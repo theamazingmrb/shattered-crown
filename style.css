@@ -1,0 +1,36 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  background: #04040e;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  font-family: 'Georgia', serif;
+  overflow: hidden;
+}
+
+#game-container {
+  position: relative;
+  width: 900px;
+  height: 620px;
+}
+
+#game-canvas {
+  display: block;
+  cursor: default;
+  border: 2px solid #2a1a4a;
+  box-shadow:
+    0 0 60px rgba(120, 60, 220, 0.4),
+    0 0 120px rgba(60, 20, 120, 0.25),
+    inset 0 0 60px rgba(0, 0, 0, 0.5);
+  border-radius: 2px;
+}
+
+#game-canvas.clickable {
+  cursor: pointer;
+}
