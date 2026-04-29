@@ -40,6 +40,17 @@ const GAME = (() => {
   let varethChoiceResult = null; // 0=resist, 1=accept
   let kingFreed   = false;
 
+  // ── Difficulty system ─────────────────────────────────────────
+  // 'casual': Party takes 30% less damage, auto-revive post-battle
+  // 'normal': Standard balance
+  // 'hardcore': Party takes 20% more damage, no auto-revive
+  let difficulty = 'normal';
+  const DIFFICULTY_MODS = {
+    casual:   { dmgMult: 0.70, expMult: 1.0,  autoRevive: true },
+    normal:    { dmgMult: 1.00, expMult: 1.0,  autoRevive: false },
+    hardcore:  { dmgMult: 1.20, expMult: 1.3,  autoRevive: false },
+  };
+
   // ── Title menu ───────────────────────────────────────────────
   let titleMenuIdx = 0;
   let titleMenuItems = [];
@@ -50,12 +61,16 @@ const GAME = (() => {
       const save = SAVE.get(i);
       if (save) {
         const d = new Date(save.savedAt);
-        const label = `Continue — Act ${save.actProgress}  (${d.toLocaleDateString()})`;
+        const diffLabel = save.difficulty ? ` [${save.difficulty.charAt(0).toUpperCase()}]` : '';
+        const label = `Continue — Act ${save.actProgress}${diffLabel}  (${d.toLocaleDateString()})`;
         titleMenuItems.push({ label, action: 'load', slot: i });
       } else {
         titleMenuItems.push({ label: `Slot ${i + 1} — Empty`, action: 'empty', slot: i });
       }
     }
+    // Difficulty selection
+    const diffNames = { casual: 'Casual', normal: 'Normal', hardcore: 'Hardcore' };
+    titleMenuItems.push({ label: `Difficulty: ${diffNames[difficulty]}`, action: 'cycleDifficulty' });
     titleMenuItems.push({ label: AUDIO.isMusicEnabled() ? 'Music: ON' : 'Music: OFF', action: 'toggleMusic' });
     titleMenuItems.push({ label: AUDIO.isSfxEnabled()   ? 'SFX: ON'   : 'SFX: OFF',   action: 'toggleSfx'   });
     titleMenuIdx = Math.min(titleMenuIdx, titleMenuItems.length - 1);
@@ -71,6 +86,7 @@ const GAME = (() => {
       finalChoiceResult,
       varethChoiceResult,
       kingFreed,
+      difficulty,  // Save difficulty mode
       playerPos: WORLD.getPlayerTile(),
       inventory: [...inventory],
       party: party.map(ch => ({
@@ -103,6 +119,7 @@ const GAME = (() => {
     finalChoiceResult  = save.finalChoiceResult  ?? null;
     varethChoiceResult = save.varethChoiceResult ?? null;
     kingFreed          = save.kingFreed      || false;
+    difficulty         = save.difficulty     || 'normal';  // Restore difficulty
     inventory          = save.inventory      || [];
 
     // Rebuild party from save
@@ -187,7 +204,52 @@ const GAME = (() => {
   }
 
   // ── Post-battle EXP & leveling ──────────────────────────────
-  // ── Title menu activation ────────────────────────────────────
+  function startBattle(battleKey, cb) {
+    const battleDef = DATA.BATTLES[battleKey];
+    if (!battleDef) { console.error('Battle not found:', battleKey); return; }
+    state = 'BATTLE';
+    BATTLE.startBattle(battleDef, party, (result, survivors, varethPower) => {
+      if (cb) cb(result, survivors, varethPower);
+    }, difficulty);
+  }
+
+  function onBattleEnd(result, survivors, battleKey) {
+    if (result === 'victory') {
+      restorePartyAfterBattle(survivors);
+      const expLines = awardExp(DATA.BATTLES[battleKey]?.expReward || 50);
+      const lines = ['Victory!', ...expLines];
+      UI.showVictory(lines, () => handlePostBattle(battleKey));
+    } else {
+      onBattleDefeat(battleKey);
+    }
+  }
+
+  function onBattleDefeat(battleKey) {
+    state = 'GAMEOVER';
+    AUDIO.stopMusic();
+    AUDIO.sfx.death();
+    retryBattleKey = battleKey;
+  }
+
+  function retryBattle() {
+    state = 'BATTLE';
+    // Reset party HP/MP for retry
+    for (const ch of party) {
+      ch.hp = ch.maxHp;
+      ch.mp = ch.maxMp;
+      ch.dead = false;
+    }
+    const battleDef = DATA.BATTLES[retryBattleKey];
+    BATTLE.startBattle(battleDef, party, (result, survivors) => {
+      if (result === 'victory') {
+        onBattleEnd(result, survivors, retryBattleKey);
+      } else {
+        onBattleDefeat(retryBattleKey);
+      }
+    }, difficulty);
+  }
+
+  let retryBattleKey = null;
   function activateTitleMenuItem(item) {
     if (!item) return;
     AUDIO.sfx.menuOpen();
@@ -217,6 +279,13 @@ const GAME = (() => {
       });
     } else if (item.action === 'load') {
       UI.fadeOut(() => loadFromSave(item.slot));
+    } else if (item.action === 'cycleDifficulty') {
+      // Cycle through difficulties
+      const diffs = ['casual', 'normal', 'hardcore'];
+      const idx = diffs.indexOf(difficulty);
+      difficulty = diffs[(idx + 1) % diffs.length];
+      rebuildTitleMenu();
+      AUDIO.sfx.menuSelect();
     } else if (item.action === 'toggleMusic') {
       AUDIO.toggleMusic();
       rebuildTitleMenu();

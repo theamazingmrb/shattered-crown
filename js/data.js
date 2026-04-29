@@ -1697,4 +1697,74 @@ const DATA = (() => {
     makeChar, applyEquipment, expForLevel,
   };
 
+  // ── Party Banter System ───────────────────────────────────────
+  // Mid-battle dialogue triggered by various events
+  const BANTER = {
+    // On battle start
+    battleStart: [
+      { speaker: 'Kael',    text: "Let's end this quickly." },
+      { speaker: 'Kael',    text: "Stay close. Watch each other's backs." },
+      { speaker: 'Lyra',    text: "I'll flank from the shadows." },
+      { speaker: 'Lyra',    text: "Same time as always — I draw, you strike." },
+      { speaker: 'Theron',  text: "Calculating optimal engagement patterns..." },
+      { speaker: 'Theron',  text: "The resonance here feels wrong. Let's be careful." },
+      { speaker: 'Sera',    text: "Stay within healing range, everyone." },
+      { speaker: 'Sera',    text: "May the light guide our blades." },
+    ],
+    // On critical hit (attacker speaks)
+    criticalHit: [
+      { speaker: 'Kael',    text: "Found the gap in their armor!" },
+      { speaker: 'Lyra',    text: "Right where I wanted them." },
+      { speaker: 'Theron',  text: "Perfect alignment!" },
+      { speaker: 'Sera',   text: "The light strikes true!" },
+      { speaker: 'Lyra',   text: "They never saw it coming." },
+      { speaker: 'Kael',   text: "That's how it's done." },
+    ],
+    // On ally death (random survivor speaks)
+    allyDeath: [
+      { speaker: 'Kael',   text: "No! Stay with me!" },
+      { speaker: 'Lyra',   text: "Get up! This isn't over!" },
+      { speaker: 'Theron', text: "The healing frequencies are — no..." },
+      { speaker: 'Sera',   text: "I won't let you fall!" },
+      { speaker: 'Kael',   text: "Everyone, fall back!" },
+      { speaker: 'Lyra',   text: "They got one of ours..." },
+    ],
+    // On boss phase change
+    bossPhase: [
+      { speaker: 'Kael',   text: "It's getting stronger — stay focused!" },
+      { speaker: 'Theron', text: "The energy readings are spiking!" },
+      { speaker: 'Lyra',   text: "Something's changing. Watch out!" },
+      { speaker: 'Sera',   text: "I can feel its power growing..." },
+    ],
+    // On victory
+    victory: [
+      { speaker: 'Kael',   text: "Is everyone intact?" },
+      { speaker: 'Lyra',   text: "Clean work. Let's move." },
+      { speaker: 'Theron', text: "Probability of success: confirmed." },
+      { speaker: 'Sera',   text: "Thank the light. Are you hurt?" },
+      { speaker: 'Kael',   text: "Another battle survived." },
+      { speaker: 'Lyra',   text: "Could've been worse." },
+    ],
+    // On low HP (character speaks about themselves)
+    lowHp: [
+      { speaker: 'Kael',   text: "I can still fight..." },
+      { speaker: 'Lyra',   text: "Just a scratch... mostly." },
+      { speaker: 'Theron', text: "My defensive matrix is failing!" },
+      { speaker: 'Sera',   text: "I... I need a moment..." },
+    ],
+  };
+
+  // Helper to get random banter for a trigger
+  function getBanter(triggerType) {
+    const pool = BANTER[triggerType];
+    if (!pool || pool.length === 0) return null;
+    return pool[Math.floor(Math.random() * pool.length)];
+  }
+
+  return {
+    WORLD_MAP, TILE_COLORS, TILE_WALKABLE, NPCS, CHESTS,
+    EQUIPMENT, SKILLS, CHAR_TEMPLATES, ENEMY_TEMPLATES,
+    BATTLES, DIALOGUE, LEVEL_SKILL_UNLOCKS, BANTER,
+    expForLevel, makeChar, applyEquipment, getBanter,
+  };
 })();

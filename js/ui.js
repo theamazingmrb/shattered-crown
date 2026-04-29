@@ -331,6 +331,38 @@ const UI = (() => {
     }
   }
 
+  // ── Battle Quote (banter) system ─────────────────────────────
+  let battleQuote    = null;  // { speaker, text, life, maxLife }
+  function showBattleQuote(speaker, text, duration) {
+    battleQuote = { speaker, text, life: duration || 2500, maxLife: duration || 2500 };
+  }
+  function updateBattleQuote(dt) {
+    if (battleQuote) {
+      battleQuote.life -= dt;
+      if (battleQuote.life <= 0) battleQuote = null;
+    }
+  }
+  function drawBattleQuote() {
+    if (!battleQuote) return;
+    const alpha = Math.min(1, battleQuote.life / 500);
+    const y = 60;
+    // Background
+    ctx.fillStyle = `rgba(0,0,0,${0.7 * alpha})`;
+    ctx.fillRect(150, y - 20, 600, 50);
+    ctx.strokeStyle = `rgba(180,160,80,${alpha})`;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(150, y - 20, 600, 50);
+    // Speaker name
+    ctx.fillStyle = `rgba(255,220,150,${alpha})`;
+    ctx.font = 'bold 14px Georgia';
+    ctx.textAlign = 'left';
+    ctx.fillText(battleQuote.speaker, 165, y);
+    // Text
+    ctx.fillStyle = `rgba(255,255,255,${alpha})`;
+    ctx.font = '15px Georgia';
+    ctx.fillText(battleQuote.text, 165 + ctx.measureText(battleQuote.speaker).width + 15, y);
+  }
+
   function updateDialogue(dt) {
     if (!dialogueActive || !currentLine) return;
 
@@ -2155,6 +2187,8 @@ const UI = (() => {
     fadeOut, fadeIn, updateFade, drawFade, isFading,
     // pre-battle
     showPreBattle, drawPreBattle,
+    // battle quotes (banter)
+    showBattleQuote, updateBattleQuote, drawBattleQuote,
     // util
     drawWrappedText, roundRect, hexAlpha,
     // stars

@@ -25,6 +25,7 @@ const BATTLE = (() => {
   let background      = 'village';
   let terrainMap      = {};   // "col,row" -> terrain type
   let dynamicTerrainTick = 0;
+  let difficulty      = 'normal';  // Difficulty mode for damage calculations
 
   let selectedSkillKey = null;
   let moveHighlight    = [];
@@ -58,7 +59,7 @@ const BATTLE = (() => {
   let turnQueue = [];
 
   // ── Setup ────────────────────────────────────────────────────
-  function startBattle(battleDef, partyState, cb, extraFlags) {
+  function startBattle(battleDef, partyState, cb, difficultyMode) {
     units           = [];
     floatingTexts   = [];
     selectedSkillKey = null;
@@ -78,6 +79,16 @@ const BATTLE = (() => {
     bossEndsAtOneHP   = battleDef.bossEndsAtOneHP || null;
     dynamicTerrainTick = 0;
     flashAlpha = 0;
+    difficulty = difficultyMode || 'normal';  // Store difficulty for damage calcs
+
+    // ── Battle start banter ─────────────────────────────────────
+    // Show a random party quip when battle begins
+    const startBanter = DATA.getBanter('battleStart');
+    if (startBanter) {
+      setTimeout(() => {
+        UI.showBattleQuote(startBanter.speaker, startBanter.text, 2500);
+      }, 600);
+    }
 
     // Build terrain map
     terrainMap = {};
@@ -332,6 +343,11 @@ const BATTLE = (() => {
     }
     if (enemyAlive.length === 0) {
       phase = 'victory';
+      // Victory banter
+      const victoryBanter = DATA.getBanter('victory');
+      if (victoryBanter) {
+        setTimeout(() => UI.showBattleQuote(victoryBanter.speaker, victoryBanter.text, 2500), 600);
+      }
       setTimeout(() => {
         if (onBattleEnd) onBattleEnd('victory', units.filter(u => u.isPlayer), varethPowerAccepted);
       }, 1400);
@@ -364,6 +380,7 @@ const BATTLE = (() => {
 
     UI.updateParticles(dt);
     UI.updateShake();
+    UI.updateBattleQuote(dt);  // Update battle banter quotes
 
     if (phase === 'defeat') {
       if (INPUT.wasPressed('Enter') || INPUT.wasPressed(' ')) {
@@ -642,6 +659,13 @@ const BATTLE = (() => {
           if (Math.random() * 100 < 5 + (caster.luck || 0) / 10) {
             dmg = Math.floor(dmg * 1.5);
             addFloatXY(targetCol*CELL+GRID_X+CELL/2-14, targetRow*CELL+GRID_Y+CELL/2-30, 'CRIT!', '#ffff44');
+            // Critical hit banter
+            if (caster.isPlayer) {
+              const critBanter = DATA.getBanter('criticalHit');
+              if (critBanter) {
+                setTimeout(() => UI.showBattleQuote(critBanter.speaker, critBanter.text, 2000), 300);
+              }
+            }
           }
           applyHit(caster, target, dmg, sk, 'physical');
           // Blade Storm: hit ALL adjacent
@@ -931,6 +955,13 @@ const BATTLE = (() => {
     return Math.max(0, val);
   }
 
+  // Difficulty damage modifiers
+  const DIFFICULTY_MODS = {
+    casual:   { dmgMult: 0.70 },
+    normal:    { dmgMult: 1.00 },
+    hardcore:  { dmgMult: 1.20 },
+  };
+
   function calcPhysDmg(caster, target, mult, terrainMult) {
     const atkStat = getBuffedStat(caster, 'atk');
     const defStat = getBuffedStat(target, 'def');
@@ -938,7 +969,13 @@ const BATTLE = (() => {
     const physResist = target.physResist || 0;
     const base = Math.max(1, atkStat * mult * (1 + terrainMult) - defStat * 0.5);
     const rand = 0.88 + Math.random() * 0.24;
-    return Math.max(1, Math.floor(base * rand * (1 - physResist)));
+    let dmg = Math.max(1, Math.floor(base * rand * (1 - physResist)));
+    // Apply difficulty modifier for player targets
+    if (target.isPlayer && !caster.isPlayer) {
+      const mod = DIFFICULTY_MODS[difficulty] || DIFFICULTY_MODS.normal;
+      dmg = Math.floor(dmg * mod.dmgMult);
+    }
+    return dmg;
   }
 
   function calcMagDmg(caster, target, mult, terrainMult) {
@@ -947,7 +984,13 @@ const BATTLE = (() => {
     const defStat = getBuffedStat(target, 'def') * 0.3;
     const base = Math.max(1, magStat * mult * (1 + terrainMult) - defStat);
     const rand = 0.88 + Math.random() * 0.24;
-    return Math.max(1, Math.floor(base * rand));
+    let dmg = Math.max(1, Math.floor(base * rand));
+    // Apply difficulty modifier for player targets
+    if (target.isPlayer && !caster.isPlayer) {
+      const mod = DIFFICULTY_MODS[difficulty] || DIFFICULTY_MODS.normal;
+      dmg = Math.floor(dmg * mod.dmgMult);
+    }
+    return dmg;
   }
 
   function applyHit(caster, target, dmg, sk, dmgType) {
@@ -1016,6 +1059,13 @@ const BATTLE = (() => {
     if (target.hp <= 0) {
       UI.spawnParticles(GRID_X+target.col*CELL+CELL/2, GRID_Y+target.row*CELL+CELL/2, 'death', 8);
       if (typeof AUDIO !== 'undefined') AUDIO.sfx.death();
+      // Ally death banter
+      if (target.isPlayer) {
+        const deathBanter = DATA.getBanter('allyDeath');
+        if (deathBanter) {
+          setTimeout(() => UI.showBattleQuote(deathBanter.speaker, deathBanter.text, 2500), 400);
+        }
+      }
     }
 
     if (dmg >= 40) { UI.screenShake(3, 3); }
@@ -1240,6 +1290,7 @@ const BATTLE = (() => {
     drawFloatingTexts();
     UI.drawParticles();
     drawPanel();
+    UI.drawBattleQuote();  // Draw battle banter quotes
 
     // Tooltip (drawn outside shake transform to keep it stable)
     ctx.restore();
@@ -1577,9 +1628,199 @@ const BATTLE = (() => {
     }
   }
 
+  // ── Idle animation offset ───────────────────────────────────
+  function getIdleBob(u) {
+    // Staggered breathing animation, different per unit type
+    if (u.isPlayer) {
+      return Math.sin(pulseT * 2.5 + u.col * 0.8) * 2.5;
+    } else {
+      return Math.sin(pulseT * 3.0 + u.col * 1.2) * 1.5;
+    }
+  }
+
+  // ── Draw procedural character sprite ───────────────────────────
+  function drawCharacterSprite(u, cx, cy, r) {
+    const baseColor = u.color || '#888';
+    const name = u.name ? u.name.toLowerCase() : '';
+    
+    // Determine character type for sprite
+    let spriteType = 'enemy';
+    if (u.isPlayer) {
+      if (name.includes('kael')) spriteType = 'knight';
+      else if (name.includes('lyra')) spriteType = 'rogue';
+      else if (name.includes('theron')) spriteType = 'mage';
+      else if (name.includes('sera')) spriteType = 'healer';
+    } else {
+      // Enemy types
+      if (name.includes('bandit') || name.includes('thief') || name.includes('enf')) spriteType = 'bandit';
+      else if (name.includes('spirit') || name.includes('wraith') || name.includes('ghost')) spriteType = 'spirit';
+      else if (name.includes('captain') || name.includes('boss') || name.includes('aldric')) spriteType = 'boss';
+      else if (name.includes('vareth') || name.includes('shade')) spriteType = 'vareth';
+    }
+
+    ctx.save();
+    
+    switch (spriteType) {
+      case 'knight':
+        // Kael: Armored knight with sword
+        // Body (armor)
+        ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI*2);
+        const knightGrad = ctx.createRadialGradient(cx-4, cy-4, 2, cx, cy, r);
+        knightGrad.addColorStop(0, '#6699ff');
+        knightGrad.addColorStop(1, baseColor);
+        ctx.fillStyle = knightGrad; ctx.fill();
+        ctx.strokeStyle = '#334477'; ctx.lineWidth = 2; ctx.stroke();
+        // Sword (right side)
+        ctx.strokeStyle = '#cccccc'; ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.moveTo(cx+r+2, cy-5); ctx.lineTo(cx+r+12, cy-15); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(cx+r+5, cy-10); ctx.lineTo(cx+r+10, cy-10); ctx.stroke();
+        // Shield hint (left side)
+        ctx.fillStyle = '#445577';
+        ctx.beginPath(); ctx.ellipse(cx-r-2, cy, 6, 8, 0, 0, Math.PI*2); ctx.fill();
+        break;
+
+      case 'rogue':
+        // Lyra: Hooded figure with daggers
+        ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI*2);
+        const rogueGrad = ctx.createRadialGradient(cx-4, cy-4, 2, cx, cy, r);
+        rogueGrad.addColorStop(0, '#cc88ff');
+        rogueGrad.addColorStop(1, baseColor);
+        ctx.fillStyle = rogueGrad; ctx.fill();
+        // Hood
+        ctx.fillStyle = '#221133';
+        ctx.beginPath(); ctx.arc(cx, cy-5, r-6, Math.PI, 0, true); ctx.fill();
+        // Daggers (crossed)
+        ctx.strokeStyle = '#aaaaaa'; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(cx-10, cy+8); ctx.lineTo(cx-18, cy+18); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(cx+10, cy+8); ctx.lineTo(cx+18, cy+18); ctx.stroke();
+        break;
+
+      case 'mage':
+        // Theron: Robed figure with staff
+        ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI*2);
+        const mageGrad = ctx.createRadialGradient(cx-4, cy-4, 2, cx, cy, r);
+        mageGrad.addColorStop(0, '#ff6666');
+        mageGrad.addColorStop(1, baseColor);
+        ctx.fillStyle = mageGrad; ctx.fill();
+        // Staff (right side, with glow)
+        ctx.strokeStyle = '#884422'; ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.moveTo(cx+r, cy); ctx.lineTo(cx+r+15, cy-20); ctx.stroke();
+        // Staff orb
+        ctx.beginPath(); ctx.arc(cx+r+15, cy-23, 4, 0, Math.PI*2);
+        ctx.fillStyle = '#ffaa44'; ctx.fill();
+        ctx.shadowColor = '#ff6600'; ctx.shadowBlur = 6; ctx.fill(); ctx.shadowBlur = 0;
+        // Robe lines
+        ctx.strokeStyle = '#661111'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(cx-5, cy+5); ctx.lineTo(cx-5, cy+r); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(cx+5, cy+5); ctx.lineTo(cx+5, cy+r); ctx.stroke();
+        break;
+
+      case 'healer':
+        // Sera: Gentle figure with staff and halo
+        ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI*2);
+        const healerGrad = ctx.createRadialGradient(cx-4, cy-4, 2, cx, cy, r);
+        healerGrad.addColorStop(0, '#ffee88');
+        healerGrad.addColorStop(1, baseColor);
+        ctx.fillStyle = healerGrad; ctx.fill();
+        // Halo
+        ctx.strokeStyle = '#ffff88'; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.ellipse(cx, cy-r-6, 12, 4, 0, 0, Math.PI*2); ctx.stroke();
+        ctx.shadowColor = '#ffff44'; ctx.shadowBlur = 8; ctx.stroke(); ctx.shadowBlur = 0;
+        // Staff (left side)
+        ctx.strokeStyle = '#997744'; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(cx-r-2, cy); ctx.lineTo(cx-r-14, cy-18); ctx.stroke();
+        // Staff ornament
+        ctx.beginPath(); ctx.arc(cx-r-14, cy-21, 3, 0, Math.PI*2);
+        ctx.fillStyle = '#88ffaa'; ctx.fill();
+        break;
+
+      case 'bandit':
+        // Bulky enemy
+        ctx.beginPath(); ctx.arc(cx, cy, r+2, 0, Math.PI*2);
+        ctx.fillStyle = baseColor; ctx.fill();
+        ctx.strokeStyle = '#442211'; ctx.lineWidth = 2; ctx.stroke();
+        // Rough edges (jagged)
+        ctx.strokeStyle = '#000000';
+        ctx.lineWidth = 1;
+        for (let i = 0; i < 8; i++) {
+          const angle = (i/8) * Math.PI * 2;
+          ctx.beginPath(); ctx.moveTo(cx+Math.cos(angle)*(r-2), cy+Math.sin(angle)*(r-2));
+          ctx.lineTo(cx+Math.cos(angle)*(r+4), cy+Math.sin(angle)*(r+4)); ctx.stroke();
+        }
+        break;
+
+      case 'spirit':
+        // Wispy, translucent spirit
+        ctx.globalAlpha = 0.7;
+        ctx.beginPath(); ctx.arc(cx, cy, r+3, 0, Math.PI*2);
+        const spiritGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, r+3);
+        spiritGrad.addColorStop(0, '#aaccff');
+        spiritGrad.addColorStop(0.5, baseColor);
+        spiritGrad.addColorStop(1, 'transparent');
+        ctx.fillStyle = spiritGrad; ctx.fill();
+        // Wispy tendrils
+        ctx.strokeStyle = '#8899aa'; ctx.lineWidth = 1;
+        for (let i = 0; i < 4; i++) {
+          const angle = (i/4) * Math.PI * 2 + pulseT * 2;
+          ctx.beginPath(); ctx.moveTo(cx, cy);
+          ctx.quadraticCurveTo(cx+Math.cos(angle)*r*1.5, cy+Math.sin(angle)*r*1.5,
+                               cx+Math.cos(angle+0.5)*(r+10), cy+Math.sin(angle+0.5)*(r+10));
+          ctx.stroke();
+        }
+        ctx.globalAlpha = 1;
+        break;
+
+      case 'boss':
+        // Large, imposing boss
+        ctx.beginPath(); ctx.arc(cx, cy, r+4, 0, Math.PI*2);
+        const bossGrad = ctx.createRadialGradient(cx-3, cy-3, 2, cx, cy, r+4);
+        bossGrad.addColorStop(0, '#ff8888');
+        bossGrad.addColorStop(1, baseColor);
+        ctx.fillStyle = bossGrad; ctx.fill();
+        // Crown or horns
+        ctx.fillStyle = '#ffcc00';
+        ctx.beginPath(); ctx.moveTo(cx-10, cy-r-2); ctx.lineTo(cx-7, cy-r-12); ctx.lineTo(cx-4, cy-r-2); ctx.fill();
+        ctx.beginPath(); ctx.moveTo(cx+4, cy-r-2); ctx.lineTo(cx+7, cy-r-12); ctx.lineTo(cx+10, cy-r-2); ctx.fill();
+        break;
+
+      case 'vareth':
+        // Vareth: Eldritch horror
+        ctx.beginPath(); ctx.arc(cx, cy, r+5, 0, Math.PI*2);
+        const varethGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, r+5);
+        varethGrad.addColorStop(0, '#aa44ff');
+        varethGrad.addColorStop(0.5, baseColor);
+        varethGrad.addColorStop(1, 'transparent');
+        ctx.fillStyle = varethGrad; ctx.fill();
+        // Void tendrils
+        ctx.strokeStyle = '#6622aa'; ctx.lineWidth = 2;
+        for (let i = 0; i < 6; i++) {
+          const angle = (i/6) * Math.PI * 2 + pulseT * 1.5;
+          ctx.beginPath();
+          ctx.moveTo(cx+Math.cos(angle)*r, cy+Math.sin(angle)*r);
+          ctx.lineTo(cx+Math.cos(angle)*(r+12), cy+Math.sin(angle)*(r+12));
+          ctx.stroke();
+        }
+        // Central eye
+        ctx.beginPath(); ctx.arc(cx, cy, 6, 0, Math.PI*2);
+        ctx.fillStyle = '#000000'; ctx.fill();
+        ctx.beginPath(); ctx.arc(cx, cy, 3, 0, Math.PI*2);
+        ctx.fillStyle = '#ff4488'; ctx.fill();
+        break;
+
+      default:
+        // Generic enemy
+        ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI*2);
+        ctx.fillStyle = baseColor; ctx.fill();
+        ctx.strokeStyle = '#333'; ctx.lineWidth = 1.5; ctx.stroke();
+    }
+    
+    ctx.restore();
+  }
+
   function drawUnit(u) {
     const cx = GRID_X + u.col*CELL + CELL/2;
-    const cy = GRID_Y + u.row*CELL + CELL/2;
+    const idleBob = getIdleBob(u);
+    const cy = GRID_Y + u.row*CELL + CELL/2 + idleBob;
     const r  = 20;
     const isActive = units[currentUnitIdx] === u;
     const t  = Date.now();
@@ -1592,28 +1833,23 @@ const BATTLE = (() => {
       ctx.strokeStyle=`rgba(255,255,100,${p*0.7})`; ctx.lineWidth=2.5; ctx.stroke();
     }
 
-    // Shadow
-    ctx.beginPath(); ctx.ellipse(cx, cy+r+2, r*0.7, 5, 0, 0, Math.PI*2);
+    // Shadow (stays grounded, no bob)
+    const shadowY = GRID_Y + u.row*CELL + CELL/2 + 2;
+    ctx.beginPath(); ctx.ellipse(cx, shadowY, r*0.7, 5, 0, 0, Math.PI*2);
     ctx.fillStyle='rgba(0,0,0,0.45)'; ctx.fill();
 
-    // Body circle (gradient)
-    const unitGrad = ctx.createRadialGradient(cx-4, cy-4, 2, cx, cy, r);
-    const baseColor = u.color || '#888';
-    unitGrad.addColorStop(0, lightenColor(baseColor, 40));
-    unitGrad.addColorStop(1, baseColor);
-    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI*2);
-    ctx.fillStyle = unitGrad; ctx.fill();
+    // Draw procedural sprite
+    drawCharacterSprite(u, cx, cy, r);
+    
+    // Active unit highlight
     ctx.strokeStyle = isActive ? '#ffff88' : (u.isPlayer ? '#aaddff' : '#ff6644');
-    ctx.lineWidth = isActive ? 3 : 1.5; ctx.stroke();
+    ctx.lineWidth = isActive ? 3 : 1.5;
+    ctx.beginPath(); ctx.arc(cx, cy, r+2, 0, Math.PI*2); ctx.stroke();
 
-    // Portrait or initial
+    // Portrait overlay for player units (smaller, top-right)
     if (u.isPlayer && u.portrait && u.portrait !== 'none') {
-      UI.drawPortrait(u.portrait, cx, cy, r-2);
-    } else {
-      ctx.fillStyle = '#ffffff';
-      ctx.font = 'bold 13px Georgia';
-      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText(u.name[0], cx, cy);
+      // Small portrait in corner instead of replacing sprite
+      UI.drawPortrait(u.portrait, cx, cy, r-6);
     }
 
     // Status icons (small dots above unit)
