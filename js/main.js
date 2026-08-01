@@ -642,10 +642,13 @@ const GAME = (() => {
       state = 'BATTLE';
       AUDIO.crossfadeTo(musicTrack, 800);
       // Wrap cb to capture battle stats (bestiary + discovered weaknesses).
+      // Pass difficulty + consumables through so the ITEMS menu is stocked and
+      // damage scales to the chosen mode (both were being dropped before).
       BATTLE.startBattle(battleDef, party, (result, survivors, varAcc, inv, drops, stats) => {
         persistBattleStats(stats);
+        if (inv) partyInventory = inv;   // carry surviving consumables back out
         if (cb) cb(result, survivors, varAcc, inv, drops, stats);
-      });
+      }, difficulty, partyInventory);
       UI.fadeIn(300);
     }, 400);
   }
