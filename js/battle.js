@@ -729,6 +729,17 @@ const BATTLE = (() => {
     battleInventory[itemKey]--;
     if (battleInventory[itemKey] <= 0) delete battleInventory[itemKey];
 
+    // Offensive throwable (e.g. Sunflare Vial): route through applyHit so it
+    // exploits weakness, chips guard toward Stagger, and plays the projectile —
+    // exactly like an element-tagged skill. Synthesise a skill from the item.
+    if (item.offensive && target && !target.isPlayer && !target.dead) {
+      const throwSk = { name:item.name, element:item.element, type:'magic' };
+      addBattleLog(`${user.name} hurled ${item.name} at ${target.name}!`, 'item');
+      applyHit(user, target, item.dmg || 20, throwSk, 'magic');
+      battleStats.itemsUsed++;
+      return true;
+    }
+
     // Apply effects
     if (item.healHp && target) {
       const amt = Math.min(item.healHp, target.maxHp - target.hp);
@@ -775,8 +786,16 @@ const BATTLE = (() => {
   function getItemTargetRange(user, itemKey) {
     const item = DATA.CONSUMABLES[itemKey];
     if (!item) return [];
-    // Items target allies (living for heal/mp, dead for revive)
     const targets = [];
+    // Offensive items (e.g. Sunflare Vial) target living enemies.
+    if (item.offensive) {
+      for (const u of units) {
+        if (u.isPlayer || u.dead) continue;
+        targets.push({ col: u.col, row: u.row, unit: u });
+      }
+      return targets;
+    }
+    // Support items target allies (living for heal/mp, dead for revive).
     for (const u of units) {
       if (!u.isPlayer) continue;
       if (item.reviveHp && u.dead) targets.push({ col: u.col, row: u.row, unit: u });

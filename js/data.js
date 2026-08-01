@@ -80,7 +80,9 @@ const DATA = (() => {
   const NPCS = [
     // Ember Village area
     { tx:4,  ty:7,  name:'Village Elder (Dying)', color:'#ffddaa', portrait:'elder',
-      lines:['The fires... they came with that sigil. A broken crown.','Kael... your father... he left something for you. Take it.'],
+      lines:['The fires... they came with that sigil. A broken crown.',
+             'Kael... your father left these for you. Sunflare vials — bottled light. He said the dark things fear it.',
+             'Two is all I saved from the flames. Use them well... I am... so tired now.'],
       actMin:0, actMax:0, id:'emberElder' },
     { tx:5,  ty:7,  name:'Villager', color:'#ccaa88', portrait:'none',
       lines:['Run! The bandits set fire to everything!','...I heard the Elder whispering something about the old king.'],
@@ -258,6 +260,11 @@ const DATA = (() => {
     antidote:    { name:'Antidote',    desc:'Cure poison',             cure:'poison' },
     elixir:      { name:'Elixir',      desc:'Restore 80 HP + 40 MP',  healHp:80, healMp:40 },
     phoenix_ash: { name:'Phoenix Ash', desc:'Revive ally at 40% HP',  reviveHp:0.4 },
+    // Offensive throwable — anyone can hurl it. Light element, so it exploits
+    // light-weak foes and chips guard toward a Stagger (routed through applyHit
+    // in battle.js). The early answer to enemies the party's weapons can't probe.
+    sunflare_vial: { name:'Sunflare Vial', desc:'Hurl light damage at a foe',
+                     dmg:20, element:'light', offensive:true },
   };
 
   function rollDrops(dropsArray) {

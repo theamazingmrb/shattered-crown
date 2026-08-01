@@ -224,7 +224,10 @@ const GAME = (() => {
       UI.fadeOut(() => {
         console.log('[NEW GAME] FadeOut complete, initializing game state...');
         inventory          = [];
-        partyInventory     = { hp_potion: 2, mp_potion: 1 };
+        // 2 Sunflare Vials — the dying Elder's gift ("your father left something
+        // for you"). Granted unconditionally so a skipped dialogue can't lose them;
+        // they're the early tool for probing light-weak foes (e.g. the B2 wraith).
+        partyInventory     = { hp_potion: 2, mp_potion: 1, sunflare_vial: 2 };
         bestiary           = {};
         actProgress        = 0;
         actTriggered       = {};
