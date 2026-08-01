@@ -3018,7 +3018,8 @@ const BATTLE = (() => {
         const item = DATA.CONSUMABLES[selectedItemKey];
         if (item) {
           ctx.fillStyle='#88ffaa'; ctx.font='10px Georgia';
-          ctx.fillText(`→ ${item.name}: Click ally to use`, px+4, cancelY+32);
+          const tgtWord = item.offensive ? 'enemy' : 'ally';
+          ctx.fillText(`→ ${item.name}: Click ${tgtWord} to use`, px+4, cancelY+32);
         }
       }
     } else if (phase === 'playerMove') {
