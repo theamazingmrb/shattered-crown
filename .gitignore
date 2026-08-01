@@ -1,0 +1,16 @@
+# Planning docs
+plan.md
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.vscode/
+.idea/
+
+# Claude memory
+.claude/
+
+# Logs
+*.log

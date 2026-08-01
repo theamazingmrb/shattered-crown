@@ -46,6 +46,7 @@ const AUDIO = (() => {
     musicGain.connect(masterGain);
     sfxGain.connect(masterGain);
     masterGain.connect(ctx.destination);
+    loadRealSfx();
   }
 
   function buildReverb(dur, decay) {
@@ -380,11 +381,13 @@ const AUDIO = (() => {
     },
     menuOpen() {
       ensureCtx();
+      if (playBuf('bookOpen', 0.55)) return;
       sfxN(N.G4, 0.08, 0.22, 'sine');
       sfxN(N.D5, 0.10, 0.20, 'sine', 0.08);
     },
     menuClose() {
       ensureCtx();
+      if (playBuf('bookClose', 0.55)) return;
       sfxN(N.D5, 0.08, 0.18, 'sine');
       sfxN(N.G4, 0.10, 0.16, 'sine', 0.07);
     },
@@ -392,6 +395,7 @@ const AUDIO = (() => {
     sword() {
       ensureCtx();
       if (!ctx || !sfxEnabled) return;
+      if (playBuf('sword', 0.7)) return;
       const osc = ctx.createOscillator();
       const g   = ctx.createGain();
       osc.type  = 'sawtooth';
@@ -407,6 +411,7 @@ const AUDIO = (() => {
     hit() {
       ensureCtx();
       if (!ctx || !sfxEnabled) return;
+      if (playBuf('hit', 0.6)) return;
       const osc = ctx.createOscillator();
       const g   = ctx.createGain();
       osc.type  = 'square';
@@ -527,17 +532,21 @@ const AUDIO = (() => {
 
     step() {
       ensureCtx();
+      const k = `step${Math.floor(Math.random() * 5)}`;
+      if (playBuf(k, 0.35)) return;
       sfxN(95 + Math.random() * 30, 0.04, 0.05, 'sine');
     },
 
     chestOpen() {
       ensureCtx();
+      if (playBuf('coins', 0.65)) return;
       [N.C4,N.E4,N.G4,N.B4,N.D5,N.G5].forEach((f, i) =>
         sfxN(f, 0.15, 0.22, 'triangle', i * 0.055));
     },
 
     equip() {
       ensureCtx();
+      if (playBuf('equipSnd', 0.60)) return;
       sfxN(N.C5, 0.06, 0.25, 'triangle');
       sfxN(N.E5, 0.08, 0.20, 'triangle', 0.08);
       sfxN(N.G5, 0.10, 0.15, 'triangle', 0.16);
@@ -545,6 +554,7 @@ const AUDIO = (() => {
 
     dialogue() {
       ensureCtx();
+      if (playBuf('bookFlip', 0.20)) return;
       sfxN(N.G5, 0.022, 0.04, 'square');
     },
 
@@ -580,6 +590,43 @@ const AUDIO = (() => {
       sfxN(666, 1.5, 0.12, 'sawtooth', 0.3);
     },
   };
+
+  // ── Real OGG sound effects (Kenney RPG Audio — CC0) ───────
+  const realBufs = {};
+
+  async function loadBuf(key, url) {
+    if (!ctx) return;
+    try {
+      const res = await fetch(url);
+      const ab  = await res.arrayBuffer();
+      realBufs[key] = await ctx.decodeAudioData(ab);
+    } catch (e) { /* silently skip — procedural fallback */ }
+  }
+
+  function playBuf(key, vol) {
+    if (!ctx || !sfxEnabled || !realBufs[key]) return false;
+    const src = ctx.createBufferSource();
+    src.buffer = realBufs[key];
+    const g = ctx.createGain();
+    g.gain.value = vol != null ? vol : 1.0;
+    src.connect(g);
+    g.connect(sfxGain);
+    src.start();
+    return true;
+  }
+
+  function loadRealSfx() {
+    const B = 'assets/rpg-audio/Audio/';
+    for (let i = 0; i < 5; i++) loadBuf(`step${i}`, `${B}footstep0${i}.ogg`);
+    loadBuf('sword',     B + 'knifeSlice.ogg');
+    loadBuf('hit',       B + 'chop.ogg');
+    loadBuf('coins',     B + 'handleCoins.ogg');
+    loadBuf('metalHit',  B + 'metalPot1.ogg');
+    loadBuf('equipSnd',  B + 'metalLatch.ogg');
+    loadBuf('bookOpen',  B + 'bookOpen.ogg');
+    loadBuf('bookClose', B + 'bookClose.ogg');
+    loadBuf('bookFlip',  B + 'bookFlip1.ogg');
+  }
 
   // ── Settings toggles ───────────────────────────────────────
   function toggleMusic() {

@@ -267,6 +267,178 @@ const UI = (() => {
         ctx.strokeStyle = '#a08060'; ctx.lineWidth = 1.5;
         ctx.beginPath(); ctx.moveTo(cx-r*0.2, cy+r*0.22); ctx.lineTo(cx+r*0.2, cy+r*0.22); ctx.stroke();
       },
+      elder: () => {
+        // Elder Brennan — wise, weathered village elder
+        ctx.fillStyle = '#1a1510'; ctx.fillRect(cx-r, cy-r, r*2, r*2);
+        // White/gray hair and beard
+        ctx.fillStyle = '#ccccbb';
+        ctx.beginPath(); ctx.ellipse(cx, cy-r*0.2, r*0.75, r*0.6, 0, 0, Math.PI*2); ctx.fill();
+        // Full beard
+        ctx.beginPath(); ctx.ellipse(cx, cy+r*0.45, r*0.55, r*0.45, 0, 0, Math.PI*2); ctx.fill();
+        // Side beard wisps
+        ctx.beginPath(); ctx.ellipse(cx-r*0.5, cy+r*0.2, r*0.18, r*0.4, -0.3, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.ellipse(cx+r*0.5, cy+r*0.2, r*0.18, r*0.4, 0.3, 0, Math.PI*2); ctx.fill();
+        // Weathered face
+        ctx.fillStyle = '#c4a080';
+        ctx.beginPath(); ctx.ellipse(cx, cy+r*0.05, r*0.48, r*0.55, 0, 0, Math.PI*2); ctx.fill();
+        // Kind, tired eyes
+        ctx.fillStyle = '#4a4a4a';
+        ctx.beginPath(); ctx.arc(cx-r*0.18, cy-r*0.05, r*0.09, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(cx+r*0.18, cy-r*0.05, r*0.09, 0, Math.PI*2); ctx.fill();
+        ctx.fillStyle = '#000';
+        ctx.beginPath(); ctx.arc(cx-r*0.18, cy-r*0.05, r*0.05, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(cx+r*0.18, cy-r*0.05, r*0.05, 0, Math.PI*2); ctx.fill();
+        // Wrinkles (age lines)
+        ctx.strokeStyle = '#a08060'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(cx-r*0.35, cy-r*0.2); ctx.quadraticCurveTo(cx-r*0.15, cy-r*0.15, cx-r*0.05, cy-r*0.18); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(cx+r*0.35, cy-r*0.2); ctx.quadraticCurveTo(cx+r*0.15, cy-r*0.15, cx+r*0.05, cy-r*0.18); ctx.stroke();
+        // Gentle concerned expression
+        ctx.strokeStyle = '#b09070'; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.moveTo(cx-r*0.15, cy+r*0.25); ctx.quadraticCurveTo(cx, cy+r*0.2, cx+r*0.15, cy+r*0.25); ctx.stroke();
+      },
+      // Ghostly echo of Kael's father
+      echo_father: () => {
+        ctx.fillStyle = '#0a1a2e'; ctx.fillRect(cx-r, cy-r, r*2, r*2);
+        // Translucent ghostly blue-white hair
+        ctx.fillStyle = '#88aabb';
+        ctx.beginPath(); ctx.ellipse(cx, cy-r*0.18, r*0.72, r*0.58, 0, 0, Math.PI*2); ctx.fill();
+        // Ghostly face — similar to Kael but older, ethereal
+        ctx.fillStyle = '#aaccdd';
+        ctx.beginPath(); ctx.ellipse(cx, cy+r*0.1, r*0.5, r*0.58, 0, 0, Math.PI*2); ctx.fill();
+        // Eyes — distant, memory-like
+        ctx.fillStyle = '#ddeeff';
+        ctx.beginPath(); ctx.arc(cx-r*0.2, cy-r*0.05, r*0.1, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(cx+r*0.2, cy-r*0.05, r*0.1, 0, Math.PI*2); ctx.fill();
+        ctx.fillStyle = '#6688aa';
+        ctx.beginPath(); ctx.arc(cx-r*0.2, cy-r*0.05, r*0.055, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(cx+r*0.2, cy-r*0.05, r*0.055, 0, Math.PI*2); ctx.fill();
+        // Faded scar like Kael's
+        ctx.strokeStyle = '#99bbcc'; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.moveTo(cx+r*0.1, cy-r*0.2); ctx.lineTo(cx+r*0.25, cy+r*0.05); ctx.stroke();
+        // Gentle expression — fond memory
+        ctx.strokeStyle = '#bbccdd'; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.moveTo(cx-r*0.2, cy+r*0.2); ctx.quadraticCurveTo(cx, cy+r*0.25, cx+r*0.2, cy+r*0.2); ctx.stroke();
+      },
+      // Ghostly echo of Malachar
+      echo_malachar: () => {
+        ctx.fillStyle = '#1a0a2e'; ctx.fillRect(cx-r, cy-r, r*2, r*2);
+        // Translucent white hair
+        ctx.fillStyle = '#aa99cc';
+        ctx.beginPath(); ctx.ellipse(cx, cy-r*0.15, r*0.7, r*0.55, 0, 0, Math.PI*2); ctx.fill();
+        // Beard — ghostly
+        ctx.beginPath(); ctx.ellipse(cx, cy+r*0.4, r*0.4, r*0.35, 0, 0, Math.PI*2); ctx.fill();
+        // Ethereal face
+        ctx.fillStyle = '#bbaadd';
+        ctx.beginPath(); ctx.ellipse(cx, cy+r*0.1, r*0.48, r*0.52, 0, 0, Math.PI*2); ctx.fill();
+        // Ghostly eyes
+        ctx.fillStyle = '#ddccff';
+        ctx.beginPath(); ctx.ellipse(cx-r*0.2, cy-r*0.06, r*0.11, r*0.07, 0, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.ellipse(cx+r*0.2, cy-r*0.06, r*0.11, r*0.07, 0, 0, Math.PI*2); ctx.fill();
+        ctx.fillStyle = '#8866aa';
+        ctx.beginPath(); ctx.arc(cx-r*0.2, cy-r*0.06, r*0.06, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(cx+r*0.2, cy-r*0.06, r*0.06, 0, Math.PI*2); ctx.fill();
+        // Faded wrinkles
+        ctx.strokeStyle = '#9988bb'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(cx-r*0.35, cy-r*0.15); ctx.lineTo(cx-r*0.08, cy-r*0.1); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(cx+r*0.35, cy-r*0.15); ctx.lineTo(cx+r*0.08, cy-r*0.1); ctx.stroke();
+      },
+      // King Valdris — royal, regal but weary
+      king: () => {
+        ctx.fillStyle = '#1a1810'; ctx.fillRect(cx-r, cy-r, r*2, r*2);
+        // Golden crown
+        ctx.fillStyle = '#ddaa22';
+        ctx.beginPath(); ctx.moveTo(cx-r*0.5, cy-r*0.3); ctx.lineTo(cx-r*0.4, cy-r*0.6);
+        ctx.lineTo(cx-r*0.2, cy-r*0.45); ctx.lineTo(cx, cy-r*0.65);
+        ctx.lineTo(cx+r*0.2, cy-r*0.45); ctx.lineTo(cx+r*0.4, cy-r*0.6);
+        ctx.lineTo(cx+r*0.5, cy-r*0.3); ctx.closePath(); ctx.fill();
+        // Crown jewels
+        ctx.fillStyle = '#cc2222';
+        ctx.beginPath(); ctx.arc(cx, cy-r*0.55, r*0.08, 0, Math.PI*2); ctx.fill();
+        ctx.fillStyle = '#2222cc';
+        ctx.beginPath(); ctx.arc(cx-r*0.3, cy-r*0.45, r*0.05, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(cx+r*0.3, cy-r*0.45, r*0.05, 0, Math.PI*2); ctx.fill();
+        // Gray-gold hair
+        ctx.fillStyle = '#bbaa88';
+        ctx.beginPath(); ctx.ellipse(cx, cy-r*0.15, r*0.65, r*0.5, 0, 0, Math.PI*2); ctx.fill();
+        // Royal face — noble but tired
+        ctx.fillStyle = '#d4b890';
+        ctx.beginPath(); ctx.ellipse(cx, cy+r*0.1, r*0.48, r*0.55, 0, 0, Math.PI*2); ctx.fill();
+        // Wise, sad eyes
+        ctx.fillStyle = '#664422';
+        ctx.beginPath(); ctx.arc(cx-r*0.2, cy-r*0.02, r*0.09, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(cx+r*0.2, cy-r*0.02, r*0.09, 0, Math.PI*2); ctx.fill();
+        ctx.fillStyle = '#000';
+        ctx.beginPath(); ctx.arc(cx-r*0.2, cy-r*0.02, r*0.05, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(cx+r*0.2, cy-r*0.02, r*0.05, 0, Math.PI*2); ctx.fill();
+        // Age lines — ten years in stasis
+        ctx.strokeStyle = '#a08060'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(cx-r*0.3, cy-r*0.18); ctx.lineTo(cx-r*0.1, cy-r*0.15); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(cx+r*0.3, cy-r*0.18); ctx.lineTo(cx+r*0.1, cy-r*0.15); ctx.stroke();
+        // Gentle, weary smile
+        ctx.strokeStyle = '#b09070'; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.moveTo(cx-r*0.2, cy+r*0.22); ctx.quadraticCurveTo(cx, cy+r*0.28, cx+r*0.2, cy+r*0.22); ctx.stroke();
+      },
+      // Undercity Elder — underground dweller, suspicious
+      undercity_elder: () => {
+        ctx.fillStyle = '#151520'; ctx.fillRect(cx-r, cy-r, r*2, r*2);
+        // Dark hair, slightly unkempt
+        ctx.fillStyle = '#4a4a55';
+        ctx.beginPath(); ctx.ellipse(cx, cy-r*0.2, r*0.7, r*0.55, 0, 0, Math.PI*2); ctx.fill();
+        // Messy wisps
+        ctx.strokeStyle = '#555560'; ctx.lineWidth = 2;
+        for (let i = -2; i <= 2; i++) {
+          ctx.beginPath(); ctx.moveTo(cx + i*r*0.15, cy-r*0.6);
+          ctx.quadraticCurveTo(cx + i*r*0.25, cy-r*0.4, cx + i*r*0.2, cy-r*0.25); ctx.stroke();
+        }
+        // Pale underground complexion
+        ctx.fillStyle = '#b8a898';
+        ctx.beginPath(); ctx.ellipse(cx, cy+r*0.08, r*0.5, r*0.55, 0, 0, Math.PI*2); ctx.fill();
+        // Suspicious, watchful eyes
+        ctx.fillStyle = '#554433';
+        ctx.beginPath(); ctx.arc(cx-r*0.2, cy-r*0.02, r*0.09, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(cx+r*0.2, cy-r*0.02, r*0.09, 0, Math.PI*2); ctx.fill();
+        ctx.fillStyle = '#000';
+        ctx.beginPath(); ctx.arc(cx-r*0.2, cy-r*0.02, r*0.05, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(cx+r*0.2, cy-r*0.02, r*0.05, 0, Math.PI*2); ctx.fill();
+        // Caution lines
+        ctx.strokeStyle = '#806050'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(cx-r*0.25, cy-r*0.15); ctx.lineTo(cx-r*0.05, cy-r*0.12); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(cx+r*0.25, cy-r*0.15); ctx.lineTo(cx+r*0.05, cy-r*0.12); ctx.stroke();
+        // Stern, closed mouth
+        ctx.strokeStyle = '#806050'; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.moveTo(cx-r*0.18, cy+r*0.25); ctx.lineTo(cx+r*0.18, cy+r*0.25); ctx.stroke();
+      },
+      // Vareth — the dark god, cosmic entity
+      vareth: () => {
+        ctx.fillStyle = '#0a0515'; ctx.fillRect(cx-r, cy-r, r*2, r*2);
+        // Void essence — swirling dark purple
+        const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+        grad.addColorStop(0, '#442288');
+        grad.addColorStop(0.5, '#221144');
+        grad.addColorStop(1, '#0a0515');
+        ctx.fillStyle = grad;
+        ctx.beginPath(); ctx.arc(cx, cy, r*0.9, 0, Math.PI*2); ctx.fill();
+        // Eyes — glowing void orbs
+        ctx.fillStyle = '#cc44ff';
+        ctx.shadowColor = '#ff00ff'; ctx.shadowBlur = 15;
+        ctx.beginPath(); ctx.ellipse(cx-r*0.22, cy-r*0.05, r*0.12, r*0.15, 0, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.ellipse(cx+r*0.22, cy-r*0.05, r*0.12, r*0.15, 0, 0, Math.PI*2); ctx.fill();
+        ctx.shadowBlur = 0;
+        // Dark pupils
+        ctx.fillStyle = '#110022';
+        ctx.beginPath(); ctx.arc(cx-r*0.22, cy-r*0.05, r*0.06, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(cx+r*0.22, cy-r*0.05, r*0.06, 0, Math.PI*2); ctx.fill();
+        // No mouth — entity beyond speech
+        // Shard-like cracks emanating from center
+        ctx.strokeStyle = '#8844cc'; ctx.lineWidth = 1;
+        for (let i = 0; i < 4; i++) {
+          const ang = (i * Math.PI / 2) + 0.3;
+          ctx.beginPath();
+          ctx.moveTo(cx, cy+r*0.3);
+          ctx.lineTo(cx + Math.cos(ang)*r*0.5, cy + Math.sin(ang)*r*0.5);
+          ctx.stroke();
+        }
+      },
     };
 
     const drawFn = portraits[key];
@@ -439,17 +611,15 @@ const UI = (() => {
     if (!dialogueActive || !currentLine) return;
     const x = 0, y = H - 145, w = W, h = 145;
 
-    // Background panel
-    ctx.fillStyle = 'rgba(4,4,18,0.94)';
-    ctx.fillRect(x, y, w, h);
-    // Outer border (gold)
-    ctx.strokeStyle = '#554422';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(x+1, y+1, w-2, h-2);
-    // Inner border
-    ctx.strokeStyle = '#aa8844';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(x+4, y+4, w-8, h-8);
+    // Background panel — Kenney border with dark centre fallback
+    if (typeof SPRITES === 'undefined' || !SPRITES.drawPanel(ctx, 'brown', x, y, w, h, 18)) {
+      ctx.fillStyle = 'rgba(4,4,18,0.94)';
+      ctx.fillRect(x, y, w, h);
+      ctx.strokeStyle = '#554422'; ctx.lineWidth = 2;
+      ctx.strokeRect(x+1, y+1, w-2, h-2);
+      ctx.strokeStyle = '#aa8844'; ctx.lineWidth = 1;
+      ctx.strokeRect(x+4, y+4, w-8, h-8);
+    }
 
     // Portrait
     const portKey = currentLine.portrait || 'none';
@@ -875,35 +1045,101 @@ const UI = (() => {
         }
         break;
         
-      case 'betrayal':
-        // Two figures - king and Aldric
-        ctx.fillStyle = `rgba(15,10,20,${alpha})`;
+      case 'betrayal': {
+        // Torch-lit vault chamber — moment of betrayal
+        ctx.fillStyle = `rgba(8,4,12,${alpha})`;
         ctx.fillRect(0, 0, W, H);
-        
-        // Red ominous glow
-        const betrayalGlow = ctx.createRadialGradient(W/2+50, H/2, 30, W/2+50, H/2, 200);
-        betrayalGlow.addColorStop(0, `rgba(180,40,40,${alpha * 0.4})`);
-        betrayalGlow.addColorStop(1, 'rgba(0,0,0,0)');
-        ctx.fillStyle = betrayalGlow;
-        ctx.fillRect(0, 0, W, H);
-        
-        // King (left figure)
-        ctx.fillStyle = `rgba(80,80,120,${alpha * 0.7})`;
+
+        // Torchlight from upper-left — warm amber cone
+        const torchG = ctx.createRadialGradient(120, 80, 10, 120, 80, 380);
+        torchG.addColorStop(0, `rgba(255,160,50,${alpha * 0.28})`);
+        torchG.addColorStop(0.5, `rgba(200,80,20,${alpha * 0.10})`);
+        torchG.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = torchG; ctx.fillRect(0, 0, W, H);
+
+        // Ominous red seeping from Crown shard on pedestal (centre)
+        const shardG = ctx.createRadialGradient(W/2, H/2+40, 5, W/2, H/2+40, 130);
+        shardG.addColorStop(0, `rgba(220,60,80,${alpha * 0.5 + 0.15 * Math.sin(t*2.2)})`);
+        shardG.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = shardG; ctx.fillRect(0, 0, W, H);
+
+        // Stone floor
+        ctx.fillStyle = `rgba(18,14,22,${alpha * 0.8})`;
+        ctx.fillRect(0, H*0.62, W, H*0.38);
+        // Floor cracks
+        ctx.strokeStyle = `rgba(80,60,100,${alpha * 0.3})`; ctx.lineWidth = 1;
+        for (let i=0;i<6;i++) {
+          ctx.beginPath(); ctx.moveTo(100+i*120, H*0.62); ctx.lineTo(140+i*120+i*10, H); ctx.stroke();
+        }
+
+        // Stone pedestal (centre-bottom)
+        ctx.fillStyle = `rgba(30,24,40,${alpha * 0.9})`;
+        ctx.fillRect(W/2-22, H/2+20, 44, 55);
+        ctx.fillRect(W/2-30, H/2+70, 60, 12);
+        // Crown shard on pedestal — pulsing gem
+        const gemPulse = 0.7 + 0.3*Math.sin(t*3);
+        ctx.fillStyle = `rgba(220,60,80,${alpha * gemPulse})`;
+        ctx.beginPath(); ctx.moveTo(W/2, H/2+10); ctx.lineTo(W/2+12, H/2+24); ctx.lineTo(W/2, H/2+38); ctx.lineTo(W/2-12, H/2+24); ctx.closePath(); ctx.fill();
+        const gemGlow = ctx.createRadialGradient(W/2, H/2+24, 2, W/2, H/2+24, 30);
+        gemGlow.addColorStop(0, `rgba(255,80,100,${alpha*0.7})`);
+        gemGlow.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle=gemGlow; ctx.fillRect(W/2-32, H/2, 64, 64);
+
+        const drawFigure = (cx2, groundY, headR, bodyW, bodyH, color, cloakFlare) => {
+          // Legs
+          ctx.fillStyle = color;
+          ctx.fillRect(cx2 - bodyW*0.3, groundY - bodyH*0.35, bodyW*0.28, bodyH*0.35);
+          ctx.fillRect(cx2 + bodyW*0.02, groundY - bodyH*0.35, bodyW*0.28, bodyH*0.35);
+          // Body
+          ctx.beginPath();
+          ctx.moveTo(cx2 - bodyW/2, groundY - bodyH*0.35);
+          ctx.lineTo(cx2 - bodyW/2 * 0.7, groundY - bodyH);
+          ctx.lineTo(cx2 + bodyW/2 * 0.7, groundY - bodyH);
+          ctx.lineTo(cx2 + bodyW/2, groundY - bodyH*0.35);
+          ctx.closePath(); ctx.fill();
+          // Cloak
+          ctx.beginPath();
+          ctx.moveTo(cx2 - bodyW/2 * 0.7, groundY - bodyH);
+          ctx.lineTo(cx2 - bodyW/2 - cloakFlare, groundY);
+          ctx.lineTo(cx2 + bodyW/2 + cloakFlare, groundY);
+          ctx.lineTo(cx2 + bodyW/2 * 0.7, groundY - bodyH);
+          ctx.closePath(); ctx.fill();
+          // Head
+          ctx.beginPath();
+          ctx.arc(cx2, groundY - bodyH - headR * 0.8, headR, 0, Math.PI*2);
+          ctx.fill();
+        }
+
+        const groundY = H * 0.78;
+        // King — left, tall, crown on head
+        drawFigure(W/2 - 130, groundY, 22, 56, 130, `rgba(70,80,130,${alpha*0.82})`, 18);
+        // Crown on king's head
+        const kx = W/2-130, ky = groundY - 130 - 22 - 10;
+        ctx.fillStyle = `rgba(200,180,60,${alpha*0.6})`;
+        ctx.fillRect(kx-18, ky, 36, 7);
+        for (let i=0;i<5;i++) { ctx.beginPath(); ctx.moveTo(kx-18+i*9, ky); ctx.lineTo(kx-14+i*9, ky-10-(i===2?5:0)); ctx.lineTo(kx-9+i*9, ky); ctx.fill(); }
+
+        // Aldric — right, reaching forward with hand extended
+        drawFigure(W/2 + 130, groundY, 20, 50, 120, `rgba(100,45,45,${alpha*0.88})`, 14);
+        // Extended arm toward Crown
+        ctx.fillStyle = `rgba(110,50,50,${alpha*0.88})`;
         ctx.beginPath();
-        ctx.arc(W/2-60, H/2-20, 25, 0, Math.PI*2);
-        ctx.fill();
-        ctx.fillRect(W/2-75, H/2+5, 30, 60);
-        
-        // Aldric (right figure - reaching)
-        ctx.fillStyle = `rgba(120,60,60,${alpha * 0.8})`;
+        ctx.moveTo(W/2+105, groundY - 100);
+        ctx.lineTo(W/2+50, groundY - 60);
+        ctx.lineTo(W/2+44, groundY - 50);
+        ctx.lineTo(W/2+96, groundY - 88);
+        ctx.closePath(); ctx.fill();
+        // Hand reaching toward gem
+        ctx.beginPath(); ctx.arc(W/2+42, groundY-47, 9, 0, Math.PI*2); ctx.fill();
+
+        // Shadow stretched on floor
+        ctx.fillStyle = `rgba(0,0,0,${alpha*0.35})`;
         ctx.beginPath();
-        ctx.arc(W/2+60, H/2-15, 25, 0, Math.PI*2);
-        ctx.fill();
-        ctx.fillRect(W/2+45, H/2+10, 30, 55);
-        // Reaching hand
-        ctx.fillStyle = `rgba(140,80,80,${alpha * 0.8})`;
-        ctx.fillRect(W/2+20, H/2-30, 40, 12);
+        ctx.ellipse(W/2-130, groundY, 30, 8, 0, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath();
+        ctx.ellipse(W/2+130, groundY, 28, 8, 0, 0, Math.PI*2); ctx.fill();
         break;
+      }
         
       case 'shatter':
         // Crown exploding into shards
@@ -953,93 +1189,325 @@ const UI = (() => {
         }
         break;
         
-      case 'prince':
-        // Hooded figure in moonlight
-        ctx.fillStyle = `rgba(8,8,15,${alpha})`;
-        ctx.fillRect(0, 0, W, H);
-        
-        // Moon
-        ctx.fillStyle = `rgba(200,200,220,${alpha * 0.3})`;
-        ctx.beginPath();
-        ctx.arc(W/2+200, 100, 60, 0, Math.PI*2);
-        ctx.fill();
-        
-        // Prince silhouette
-        ctx.fillStyle = `rgba(30,30,50,${alpha * 0.8})`;
-        // Head
-        ctx.beginPath();
-        ctx.arc(W/2, H/2-30, 30, 0, Math.PI*2);
-        ctx.fill();
-        // Hood
-        ctx.beginPath();
-        ctx.moveTo(W/2-40, H/2-30);
-        ctx.lineTo(W/2, H/2-70);
-        ctx.lineTo(W/2+40, H/2-30);
-        ctx.fill();
-        // Body
-        ctx.fillRect(W/2-35, H/2, 70, 80);
-        // Cloak
-        ctx.beginPath();
-        ctx.moveTo(W/2-35, H/2+10);
-        ctx.lineTo(W/2-60, H/2+90);
-        ctx.lineTo(W/2+60, H/2+90);
-        ctx.lineTo(W/2+35, H/2+10);
-        ctx.fill();
-        break;
-        
-      case 'village':
-        // Peaceful village with houses
-        const villageGlow = ctx.createRadialGradient(W/2, H/2+100, 50, W/2, H/2+100, 250);
-        villageGlow.addColorStop(0, `rgba(60,120,60,${alpha * 0.25})`);
-        villageGlow.addColorStop(1, 'rgba(0,0,0,0)');
-        ctx.fillStyle = villageGlow;
-        ctx.fillRect(0, 0, W, H);
-        
-        // Simple houses
-        for (let i = 0; i < 3; i++) {
-          const hx = W/2 - 120 + i * 120;
-          const hy = H/2 + 50;
-          // House
-          ctx.fillStyle = `rgba(80,60,40,${alpha * 0.5})`;
-          ctx.fillRect(hx, hy, 60, 50);
-          // Roof
-          ctx.fillStyle = `rgba(100,50,30,${alpha * 0.6})`;
+      case 'prince': {
+        // Moonlit night — exiled prince departing
+        const princeSky = ctx.createLinearGradient(0,0,0,H);
+        princeSky.addColorStop(0, `rgba(2,4,18,${alpha})`);
+        princeSky.addColorStop(0.7, `rgba(6,8,28,${alpha})`);
+        princeSky.addColorStop(1, `rgba(8,12,22,${alpha})`);
+        ctx.fillStyle=princeSky; ctx.fillRect(0,0,W,H);
+
+        // Stars
+        for (const s of stars) {
+          const tw = 0.35+0.65*Math.abs(Math.sin(t*0.45+s.phase));
+          ctx.beginPath(); ctx.arc(s.x, s.y*0.65, s.r*0.55, 0, Math.PI*2);
+          ctx.fillStyle=`rgba(200,200,220,${alpha*tw*0.65})`; ctx.fill();
+        }
+
+        // Moon — high right
+        const mX = W*0.72, mY = H*0.14;
+        ctx.fillStyle=`rgba(215,220,200,${alpha*0.55})`;
+        ctx.beginPath(); ctx.arc(mX, mY, 48, 0, Math.PI*2); ctx.fill();
+        // Moon surface detail
+        ctx.fillStyle=`rgba(180,185,165,${alpha*0.3})`;
+        ctx.beginPath(); ctx.arc(mX-10, mY-8, 12, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(mX+16, mY+10, 7, 0, Math.PI*2); ctx.fill();
+        // Moon glow halo
+        const mG = ctx.createRadialGradient(mX,mY,30,mX,mY,180);
+        mG.addColorStop(0,`rgba(180,190,160,${alpha*0.22})`);
+        mG.addColorStop(1,'rgba(0,0,0,0)');
+        ctx.fillStyle=mG; ctx.fillRect(0,0,W,H);
+
+        // Moonbeam rays cast across the scene (light-blue streaks)
+        ctx.save();
+        ctx.globalAlpha = alpha * 0.06;
+        for (let i=-2; i<=2; i++) {
+          ctx.fillStyle = '#c0d0ff';
           ctx.beginPath();
-          ctx.moveTo(hx-10, hy);
-          ctx.lineTo(hx+30, hy-30);
-          ctx.lineTo(hx+70, hy);
-          ctx.fill();
-          // Window light
-          ctx.fillStyle = `rgba(255,200,100,${alpha * 0.4})`;
-          ctx.fillRect(hx+20, hy+20, 20, 20);
+          ctx.moveTo(mX + i*22, mY+48);
+          ctx.lineTo(mX + i*22 - 160 + i*60, H);
+          ctx.lineTo(mX + i*22 + 22 - 160 + i*60, H);
+          ctx.lineTo(mX + i*22 + 18, mY+48);
+          ctx.closePath(); ctx.fill();
+        }
+        ctx.restore();
+
+        // Ground with road
+        ctx.fillStyle=`rgba(8,12,8,${alpha*0.9})`; ctx.fillRect(0,H*0.70,W,H*0.30);
+        // Dirt path catching moonlight
+        const roadG = ctx.createLinearGradient(0,H*0.70,0,H);
+        roadG.addColorStop(0,`rgba(40,38,28,${alpha*0.5})`);
+        roadG.addColorStop(1,`rgba(28,26,18,${alpha*0.5})`);
+        ctx.fillStyle=roadG;
+        ctx.beginPath(); ctx.moveTo(W*0.38,H*0.70); ctx.lineTo(W*0.62,H*0.70); ctx.lineTo(W*0.80,H); ctx.lineTo(W*0.20,H); ctx.closePath(); ctx.fill();
+
+        // Ground mist (wisps drifting left)
+        for (let i=0;i<5;i++) {
+          const mx2 = (W*0.1 + i*W*0.18 + t*12)%W;
+          const ma = 0.06+0.04*Math.sin(t*0.3+i);
+          ctx.fillStyle=`rgba(140,150,180,${alpha*ma})`;
+          ctx.beginPath(); ctx.ellipse(mx2, H*0.74, 80+i*20, 14, 0, 0, Math.PI*2); ctx.fill();
+        }
+
+        // Prince silhouette — detailed hooded traveller
+        const px = W*0.45, py = H*0.76;
+        const fig = `rgba(18,18,30,${alpha*0.92})`;
+        const figL = `rgba(28,28,48,${alpha*0.85})`;  // lighter side (moonlit)
+        // Legs / boots
+        ctx.fillStyle=fig; ctx.fillRect(px-14, py-52, 16, 52); ctx.fillRect(px+2, py-52, 16, 52);
+        // Body
+        ctx.fillStyle=figL;
+        ctx.beginPath(); ctx.moveTo(px-22,py-52); ctx.lineTo(px-18,py-115); ctx.lineTo(px+18,py-115); ctx.lineTo(px+22,py-52); ctx.closePath(); ctx.fill();
+        // Cloak spreading wide
+        ctx.fillStyle=fig;
+        ctx.beginPath();
+        ctx.moveTo(px-18,py-110); ctx.lineTo(px-58,py-2); ctx.lineTo(px-30,py); ctx.lineTo(px-18,py-52); ctx.closePath(); ctx.fill();
+        ctx.beginPath();
+        ctx.moveTo(px+18,py-110); ctx.lineTo(px+60,py-5); ctx.lineTo(px+32,py); ctx.lineTo(px+18,py-52); ctx.closePath(); ctx.fill();
+        // Hood peak
+        ctx.fillStyle=fig;
+        ctx.beginPath(); ctx.moveTo(px-22,py-110); ctx.lineTo(px,py-148); ctx.lineTo(px+22,py-110); ctx.closePath(); ctx.fill();
+        // Head inside hood
+        ctx.beginPath(); ctx.arc(px, py-118, 18, 0, Math.PI*2); ctx.fill();
+        // Travelling pack on back (right shoulder)
+        ctx.fillStyle=`rgba(40,28,16,${alpha*0.8})`;
+        ctx.beginPath(); ctx.arc(px+26, py-98, 14, 0, Math.PI*2); ctx.fill();
+        // Walking stick
+        ctx.strokeStyle=`rgba(60,40,20,${alpha*0.7})`; ctx.lineWidth=3;
+        ctx.beginPath(); ctx.moveTo(px+36,py-86); ctx.lineTo(px+48,py+2); ctx.stroke();
+
+        // Shadow on ground
+        ctx.fillStyle=`rgba(0,0,0,${alpha*0.28})`;
+        ctx.beginPath(); ctx.ellipse(px+6,py,28,7,0,0,Math.PI*2); ctx.fill();
+        break;
+      }
+        
+      case 'village': {
+        // Night sky with stars
+        const villageSky = ctx.createLinearGradient(0,0,0,H);
+        villageSky.addColorStop(0, `rgba(4,6,20,${alpha})`);
+        villageSky.addColorStop(0.6, `rgba(10,18,35,${alpha})`);
+        villageSky.addColorStop(1, `rgba(20,30,15,${alpha})`);
+        ctx.fillStyle = villageSky; ctx.fillRect(0,0,W,H);
+
+        // Stars
+        for (const s of stars) {
+          const tw = 0.4 + 0.6*Math.abs(Math.sin(t*0.4+s.phase));
+          ctx.beginPath(); ctx.arc(s.x, s.y * 0.6, s.r*0.5, 0, Math.PI*2);
+          ctx.fillStyle = `rgba(210,210,190,${alpha*tw*0.6})`; ctx.fill();
+        }
+
+        // Moon low on horizon
+        const moonX = W*0.78, moonY = H*0.22;
+        ctx.fillStyle = `rgba(220,215,180,${alpha*0.5})`;
+        ctx.beginPath(); ctx.arc(moonX, moonY, 38, 0, Math.PI*2); ctx.fill();
+        // Moon glow
+        const moonG = ctx.createRadialGradient(moonX, moonY, 20, moonX, moonY, 120);
+        moonG.addColorStop(0, `rgba(200,200,140,${alpha*0.18})`);
+        moonG.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle=moonG; ctx.fillRect(moonX-130,moonY-130,260,260);
+
+        // Distant hills (rolling silhouette)
+        ctx.fillStyle = `rgba(12,22,10,${alpha*0.9})`;
+        ctx.beginPath(); ctx.moveTo(0, H*0.58);
+        ctx.bezierCurveTo(W*0.1, H*0.44, W*0.2, H*0.52, W*0.35, H*0.50);
+        ctx.bezierCurveTo(W*0.5, H*0.48, W*0.6, H*0.55, W*0.75, H*0.46);
+        ctx.bezierCurveTo(W*0.88, H*0.38, W*0.95, H*0.50, W, H*0.52);
+        ctx.lineTo(W, H); ctx.lineTo(0, H); ctx.closePath(); ctx.fill();
+
+        // Ground
+        ctx.fillStyle = `rgba(15,28,12,${alpha})`;
+        ctx.fillRect(0, H*0.66, W, H*0.34);
+        // Path of moonlight on ground
+        ctx.fillStyle = `rgba(180,180,120,${alpha*0.04})`;
+        ctx.beginPath(); ctx.moveTo(moonX-80,H*0.66); ctx.lineTo(moonX+80,H*0.66); ctx.lineTo(W,H); ctx.lineTo(0,H); ctx.closePath(); ctx.fill();
+
+        // Draw a village house
+        const drawHouse = (hx, hy, w, h, roofH, wallColor, roofColor, winAlpha) => {
+          // Wall
+          ctx.fillStyle = wallColor; ctx.fillRect(hx, hy, w, h);
+          // Shading (left darker)
+          ctx.fillStyle = `rgba(0,0,0,0.2)`; ctx.fillRect(hx, hy, w*0.3, h);
+          // Roof
+          ctx.fillStyle = roofColor;
+          ctx.beginPath(); ctx.moveTo(hx-6, hy); ctx.lineTo(hx+w/2, hy-roofH); ctx.lineTo(hx+w+6, hy); ctx.closePath(); ctx.fill();
+          // Roof ridge shadow
+          ctx.fillStyle = `rgba(0,0,0,0.2)`;
+          ctx.beginPath(); ctx.moveTo(hx-6, hy); ctx.lineTo(hx+w/2, hy-roofH); ctx.lineTo(hx+w*0.45, hy-roofH); ctx.lineTo(hx, hy); ctx.closePath(); ctx.fill();
+          // Windows
+          const winW = w*0.18, winH = h*0.28, winFlicker = 0.55+0.2*Math.sin(t*1.8+hx);
+          ctx.fillStyle = `rgba(255,190,80,${winAlpha*winFlicker})`;
+          ctx.fillRect(hx+w*0.18, hy+h*0.28, winW, winH);
+          ctx.fillRect(hx+w*0.58, hy+h*0.28, winW, winH);
+          // Window cross
+          ctx.strokeStyle = `rgba(60,40,10,${winAlpha*0.5})`; ctx.lineWidth=1;
+          ctx.beginPath(); ctx.moveTo(hx+w*0.18+winW/2, hy+h*0.28); ctx.lineTo(hx+w*0.18+winW/2, hy+h*0.28+winH); ctx.stroke();
+          ctx.beginPath(); ctx.moveTo(hx+w*0.18, hy+h*0.28+winH/2); ctx.lineTo(hx+w*0.18+winW, hy+h*0.28+winH/2); ctx.stroke();
+          // Door
+          ctx.fillStyle = `rgba(50,30,10,${alpha*0.9})`;
+          ctx.fillRect(hx+w*0.42, hy+h*0.6, w*0.18, h*0.4);
+          // Chimney
+          ctx.fillStyle = `rgba(40,30,20,${alpha*0.8})`;
+          ctx.fillRect(hx+w*0.68, hy-roofH*0.5, w*0.10, roofH*0.5+8);
+          // Chimney smoke
+          for (let s2=0;s2<3;s2++) {
+            ctx.fillStyle = `rgba(80,80,70,${alpha*0.12*(1-s2/3)})`;
+            ctx.beginPath();
+            ctx.arc(hx+w*0.73+Math.sin(t*0.6+s2+hx)*4, hy-roofH*0.5-8-s2*14, 6+s2*3, 0, Math.PI*2);
+            ctx.fill();
+          }
+        }
+
+        const baseY = H*0.82;
+        // Background houses (smaller, darker)
+        drawHouse(W*0.08, baseY-55, 70, 55, 34, `rgba(25,18,12,${alpha*0.7})`, `rgba(35,18,8,${alpha*0.7})`, alpha*0.25);
+        drawHouse(W*0.78, baseY-48, 62, 48, 30, `rgba(25,18,12,${alpha*0.7})`, `rgba(35,18,8,${alpha*0.7})`, alpha*0.2);
+        // Foreground houses
+        drawHouse(W*0.22, baseY-75, 90, 75, 46, `rgba(55,38,22,${alpha*0.9})`, `rgba(80,38,15,${alpha*0.9})`, alpha*0.5);
+        drawHouse(W*0.42, baseY-90, 105, 90, 55, `rgba(60,40,22,${alpha*0.9})`, `rgba(90,42,16,${alpha*0.9})`, alpha*0.55);
+        drawHouse(W*0.63, baseY-68, 82, 68, 40, `rgba(52,35,20,${alpha*0.9})`, `rgba(75,36,14,${alpha*0.9})`, alpha*0.45);
+
+        // Warm green glow at ground (fireflies / hearth light spillover)
+        const vg = ctx.createRadialGradient(W/2, H*0.82, 20, W/2, H*0.82, 220);
+        vg.addColorStop(0, `rgba(80,120,40,${alpha*0.08})`);
+        vg.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle=vg; ctx.fillRect(0,H*0.55,W,H*0.45);
+        break;
+      }
+        
+      case 'castle': {
+        // Overcast night — Aldric's seat of power
+        const castleSky = ctx.createLinearGradient(0,0,0,H);
+        castleSky.addColorStop(0, `rgba(4,4,14,${alpha})`);
+        castleSky.addColorStop(0.55, `rgba(8,6,20,${alpha})`);
+        castleSky.addColorStop(1, `rgba(14,10,25,${alpha})`);
+        ctx.fillStyle=castleSky; ctx.fillRect(0,0,W,H);
+
+        // A few dim stars breaking through clouds
+        for (const s of stars) {
+          if (s.phase < 1.2) continue;
+          ctx.beginPath(); ctx.arc(s.x, s.y*0.4, s.r*0.4, 0, Math.PI*2);
+          ctx.fillStyle=`rgba(160,155,180,${alpha*0.3*(0.3+0.7*Math.abs(Math.sin(t*0.3+s.phase)))})`; ctx.fill();
+        }
+
+        // Rolling dark cloud layers
+        for (let cl=0;cl<3;cl++) {
+          const cloudAlpha = 0.12 + cl*0.06;
+          const cloudX = (t * (8+cl*4) * (cl%2?1:-1)) % (W+200) - 100;
+          ctx.fillStyle=`rgba(20,16,32,${alpha*cloudAlpha})`;
+          for (let ci=0;ci<5;ci++) {
+            ctx.beginPath(); ctx.arc((cloudX+ci*180+cl*120)%W, 60+cl*55, 80+ci*20, 0, Math.PI*2); ctx.fill();
+          }
+        }
+
+        // Distant mountain silhouette behind castle
+        ctx.fillStyle=`rgba(8,6,16,${alpha*0.85})`;
+        ctx.beginPath(); ctx.moveTo(0,H*0.65);
+        ctx.bezierCurveTo(W*0.08,H*0.40, W*0.18,H*0.50, W*0.28,H*0.42);
+        ctx.bezierCurveTo(W*0.38,H*0.34, W*0.45,H*0.44, W*0.50,H*0.38);
+        ctx.bezierCurveTo(W*0.56,H*0.32, W*0.62,H*0.46, W*0.72,H*0.40);
+        ctx.bezierCurveTo(W*0.82,H*0.35, W*0.90,H*0.48, W,H*0.52);
+        ctx.lineTo(W,H); ctx.lineTo(0,H); ctx.closePath(); ctx.fill();
+
+        // Ground mist
+        for (let mi=0;mi<4;mi++) {
+          ctx.fillStyle=`rgba(60,55,80,${alpha*0.07})`;
+          ctx.beginPath(); ctx.ellipse(W*0.25+mi*W*0.18, H*0.80, 120+mi*30, 22, 0, 0, Math.PI*2); ctx.fill();
+        }
+
+        // Castle base / ground
+        ctx.fillStyle=`rgba(10,8,18,${alpha})`; ctx.fillRect(0,H*0.72,W,H*0.28);
+
+        const cx2 = W/2, base = H*0.72;
+        const dark = (a2) => `rgba(16,12,24,${alpha*a2})`;
+        const mid =  (a2) => `rgba(22,17,34,${alpha*a2})`;
+
+        // --- Castle structure (back to front) ---
+        // Far wing walls (very dark)
+        ctx.fillStyle=dark(0.7);
+        ctx.fillRect(cx2-220, base-80, 55, 80);
+        ctx.fillRect(cx2+165, base-80, 55, 80);
+        // Far wing battlements
+        ctx.fillStyle=dark(0.8);
+        for (let i=0;i<4;i++) { ctx.fillRect(cx2-220+i*14, base-88, 8, 10); }
+        for (let i=0;i<4;i++) { ctx.fillRect(cx2+165+i*14, base-88, 8, 10); }
+
+        // Outer flanking towers
+        ctx.fillStyle=mid(0.8);
+        ctx.fillRect(cx2-170, base-160, 45, 160);
+        ctx.fillRect(cx2+125, base-160, 45, 160);
+        // Conical tower roofs
+        ctx.fillStyle=dark(0.9);
+        ctx.beginPath(); ctx.moveTo(cx2-170, base-160); ctx.lineTo(cx2-147, base-210); ctx.lineTo(cx2-125, base-160); ctx.closePath(); ctx.fill();
+        ctx.beginPath(); ctx.moveTo(cx2+125, base-160); ctx.lineTo(cx2+147, base-210); ctx.lineTo(cx2+170, base-160); ctx.closePath(); ctx.fill();
+        // Tower battlements
+        for (let i=0;i<4;i++) {
+          ctx.fillStyle=dark(0.95);
+          ctx.fillRect(cx2-170+i*11, base-168, 8, 10);
+          ctx.fillRect(cx2+125+i*11, base-168, 8, 10);
+        }
+
+        // Main curtain wall
+        ctx.fillStyle=mid(0.9);
+        ctx.fillRect(cx2-130, base-120, 260, 120);
+        // Wall battlements
+        ctx.fillStyle=dark(0.95);
+        for (let i=0;i<12;i++) { ctx.fillRect(cx2-130+i*22, base-130, 12, 12); }
+
+        // Gate archway (dark opening)
+        ctx.fillStyle=`rgba(0,0,0,${alpha*0.95})`;
+        ctx.fillRect(cx2-26, base-65, 52, 65);
+        ctx.beginPath(); ctx.arc(cx2, base-65, 26, Math.PI, 0); ctx.fill();
+        // Portcullis bars
+        ctx.strokeStyle=`rgba(14,10,20,${alpha*0.8})`; ctx.lineWidth=2.5;
+        for (let i=0;i<4;i++) { ctx.beginPath(); ctx.moveTo(cx2-18+i*12, base-90); ctx.lineTo(cx2-18+i*12, base); ctx.stroke(); }
+        ctx.beginPath(); ctx.moveTo(cx2-26, base-60); ctx.lineTo(cx2+26, base-60); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(cx2-26, base-45); ctx.lineTo(cx2+26, base-45); ctx.stroke();
+
+        // Central keep (tallest structure)
+        ctx.fillStyle=dark(0.95);
+        ctx.fillRect(cx2-55, base-260, 110, 260);
+        // Keep battlements
+        for (let i=0;i<6;i++) { ctx.fillRect(cx2-55+i*18, base-272, 11, 14); }
+        // Keep side shading (moonlit right face)
+        ctx.fillStyle=`rgba(32,26,48,${alpha*0.4})`;
+        ctx.fillRect(cx2+10, base-260, 45, 260);
+
+        // Narrow spire atop keep
+        ctx.fillStyle=dark(0.98);
+        ctx.beginPath(); ctx.moveTo(cx2-8, base-260); ctx.lineTo(cx2, base-320); ctx.lineTo(cx2+8, base-260); ctx.closePath(); ctx.fill();
+        // Flag
+        const flagWave = Math.sin(t*1.8)*4;
+        ctx.fillStyle=`rgba(130,20,20,${alpha*0.8})`;
+        ctx.beginPath(); ctx.moveTo(cx2, base-318); ctx.lineTo(cx2+28+flagWave, base-318); ctx.lineTo(cx2+28+flagWave, base-306); ctx.lineTo(cx2, base-306); ctx.closePath(); ctx.fill();
+
+        // Ominous lit windows — blood red flicker
+        const castleWin = (wx, wy, wr) => {
+          const flicker = 0.6 + 0.4*Math.sin(t*2.5+wx);
+          ctx.fillStyle=`rgba(200,60,40,${alpha*flicker*0.7})`;
+          ctx.beginPath(); ctx.arc(wx, wy, wr, 0, Math.PI*2); ctx.fill();
+          const wg = ctx.createRadialGradient(wx,wy,1,wx,wy,wr*3.5);
+          wg.addColorStop(0,`rgba(200,50,30,${alpha*flicker*0.3})`);
+          wg.addColorStop(1,'rgba(0,0,0,0)');
+          ctx.fillStyle=wg; ctx.fillRect(wx-wr*4,wy-wr*4,wr*8,wr*8);
+        }
+        castleWin(cx2, base-220, 7);
+        castleWin(cx2-80, base-100, 5);
+        castleWin(cx2+82, base-108, 5);
+        castleWin(cx2-148, base-100, 4);
+        castleWin(cx2+148, base-106, 4);
+
+        // Wall torches (amber glow pools)
+        for (let ti=0;ti<3;ti++) {
+          const tx2 = cx2-120+ti*120, ty2 = base-40;
+          const tg = ctx.createRadialGradient(tx2,ty2,3,tx2,ty2,35);
+          tg.addColorStop(0,`rgba(255,150,30,${alpha*(0.35+0.1*Math.sin(t*3+ti))})`);
+          tg.addColorStop(1,'rgba(0,0,0,0)');
+          ctx.fillStyle=tg; ctx.fillRect(tx2-36,ty2-36,72,72);
+          ctx.fillStyle=`rgba(255,200,80,${alpha*0.8})`; ctx.fillRect(tx2-2,ty2-4,4,8);
         }
         break;
-        
-      case 'castle':
-        // Detailed castle silhouette
-        ctx.fillStyle = `rgba(15,10,20,${alpha})`;
-        ctx.fillRect(0, 0, W, H);
-        
-        // Castle structure
-        ctx.fillStyle = `rgba(30,25,40,${alpha * 0.7})`;
-        // Main keep
-        ctx.fillRect(W/2-80, H/2-20, 160, 120);
-        // Towers
-        ctx.fillRect(W/2-100, H/2-40, 30, 140);
-        ctx.fillRect(W/2+70, H/2-40, 30, 140);
-        // Central tower
-        ctx.fillRect(W/2-25, H/2-80, 50, 80);
-        
-        // Battlements
-        for (let i = 0; i < 8; i++) {
-          const bx = W/2-80 + i * 20;
-          if (i % 2 === 0) ctx.fillRect(bx, H/2-30, 20, 10);
-        }
-        
-        // Ominous window
-        ctx.fillStyle = `rgba(180,100,100,${alpha * 0.6 * (0.8 + 0.2 * Math.sin(t * 2))})`;
-        ctx.fillRect(W/2-10, H/2-50, 20, 30);
-        break;
+      }
         
       case 'fire':
         // Actual animated fire
@@ -1135,10 +1603,16 @@ const UI = (() => {
     ctx.shadowBlur = 0;
     ctx.globalAlpha = 1;
 
-    // Frame counter
-    ctx.fillStyle = `rgba(100,80,60,${prologueFadeAmt * 0.7})`;
+    // Cinematic letterbox bars (widescreen film look)
+    const barH = 56;
+    ctx.fillStyle = '#000000';
+    ctx.fillRect(0, 0, W, barH);
+    ctx.fillRect(0, H - barH, W, barH);
+
+    // Frame counter / skip hint (inside bottom bar)
+    ctx.fillStyle = `rgba(120,100,70,${prologueFadeAmt * 0.65})`;
     ctx.font = '11px Georgia';
-    ctx.fillText(`${prologueFrame+1} / ${DATA.STORY.prologueFrames.length}  —  Space/Enter to skip`, W/2, H-20);
+    ctx.fillText(`${prologueFrame+1} / ${DATA.STORY.prologueFrames.length}  —  Space/Enter to skip`, W/2, H - barH/2);
     ctx.textAlign = 'left';
   }
 
@@ -1243,12 +1717,14 @@ const UI = (() => {
 
   // ── Menu system ──────────────────────────────────────────────
   let menuOpen = false;
-  let menuTab  = 0;  // 0=Status, 1=Equipment, 2=Skills, 3=Save
+  let menuTab  = 0;  // 0=Status, 1=Equipment, 2=Skills, 3=Save, 4=Bestiary
   let menuSaveCallback = null;  // set externally by main.js
+  let menuBestiaryCallback = null; // set externally by main.js
   let menuParty   = null;
   let menuEqChar  = 0;
   let menuSkChar  = 0;
-  const MENU_TABS = ['Status','Equipment','Skills','Save'];
+  let menuBestiaryScroll = 0;
+  const MENU_TABS = ['Status','Equipment','Skills','Save','Bestiary'];
 
   function openMenu(party) {
     menuOpen  = true;
@@ -1339,13 +1815,15 @@ const UI = (() => {
     // Backdrop
     ctx.fillStyle = 'rgba(0,0,0,0.88)';
     ctx.fillRect(0, 0, W, H);
-    // Panel
-    ctx.fillStyle = 'rgba(8,6,18,0.98)';
-    roundRect(ctx, 30, 30, W-60, H-60, 8); ctx.fill();
-    ctx.strokeStyle = '#554422'; ctx.lineWidth = 2;
-    roundRect(ctx, 30, 30, W-60, H-60, 8); ctx.stroke();
-    ctx.strokeStyle = '#aa8844'; ctx.lineWidth = 1;
-    roundRect(ctx, 34, 34, W-68, H-68, 6); ctx.stroke();
+    // Panel — Kenney border with dark centre fallback
+    if (typeof SPRITES === 'undefined' || !SPRITES.drawPanel(ctx, 'brown', 30, 30, W-60, H-60, 16)) {
+      ctx.fillStyle = 'rgba(8,6,18,0.98)';
+      roundRect(ctx, 30, 30, W-60, H-60, 8); ctx.fill();
+      ctx.strokeStyle = '#554422'; ctx.lineWidth = 2;
+      roundRect(ctx, 30, 30, W-60, H-60, 8); ctx.stroke();
+      ctx.strokeStyle = '#aa8844'; ctx.lineWidth = 1;
+      roundRect(ctx, 34, 34, W-68, H-68, 6); ctx.stroke();
+    }
 
     // Title
     ctx.fillStyle = '#ffdd88';
@@ -1383,6 +1861,7 @@ const UI = (() => {
     else if (menuTab === 1) drawMenuEquipment(party, inventory, cx, cy, cw, ch2);
     else if (menuTab === 2) drawMenuSkills(party, cx, cy, cw, ch2);
     else if (menuTab === 3) drawMenuSave(cx, cy, cw, ch2);
+    else if (menuTab === 4) drawMenuBestiary(cx, cy, cw, ch2);
   }
 
   function drawMenuSave(x, y, w, h) {
@@ -1536,6 +2015,8 @@ const UI = (() => {
         ctx.fillStyle = '#88aa88'; ctx.font = '11px Georgia';
         ctx.fillText(eq.desc, ex+8, slotY+36);
       }
+      // Slot type icon (top-right of row)
+      if (typeof SPRITES !== 'undefined') SPRITES.drawItemIcon(ctx, slots[s], ex+ew-56, slotY+8, 28);
       // Click instruction
       ctx.fillStyle = '#556677'; ctx.font = '10px Georgia';
       ctx.textAlign = 'right';
@@ -1605,6 +2086,64 @@ const UI = (() => {
     }
   }
 
+  function drawMenuBestiary(x, y, w, h) {
+    const bestiary = menuBestiaryCallback ? menuBestiaryCallback() : {};
+    const enemyKeys = Object.keys(DATA.ENEMY_TEMPLATES || {});
+    const unlocked = Object.keys(bestiary || {});
+    const discoveredCount = unlocked.length;
+    const totalCount = enemyKeys.length;
+
+    ctx.fillStyle = '#ccbb88';
+    ctx.font = 'bold 18px Georgia';
+    ctx.textAlign = 'center';
+    ctx.fillText(`Bestiary — ${discoveredCount}/${totalCount} Discovered`, x + w/2, y + 25);
+
+    const listX = x + 20;
+    let listY = y + 55;
+    const lineH = 28;
+
+    for (const key of enemyKeys) {
+      if (listY > y + h - 30) break;
+
+      const tmpl = DATA.ENEMY_TEMPLATES[key];
+      const entry = bestiary[key];
+      const isDiscovered = entry && entry.seen;
+      const isDefeated = entry && entry.count > 0;
+
+      if (isDiscovered) {
+        // Discovered enemy - show details
+        ctx.fillStyle = isDefeated ? '#ddccaa' : '#887766';
+        ctx.font = 'bold 14px Georgia';
+        ctx.textAlign = 'left';
+        ctx.fillText(tmpl.name || key, listX, listY);
+
+        // Stats
+        ctx.fillStyle = '#aa9988';
+        ctx.font = '11px Georgia';
+        ctx.fillText(`HP:${tmpl.maxHp} ATK:${tmpl.atk} DEF:${tmpl.def}`, listX + 150, listY);
+
+        // Defeated count
+        if (isDefeated) {
+          ctx.fillStyle = '#66aa66';
+          ctx.fillText(`✓ Defeated: ${entry.count}`, listX + 280, listY);
+        } else {
+          ctx.fillStyle = '#666666';
+          ctx.fillText('? Seen', listX + 280, listY);
+        }
+      } else {
+        // Undiscovered - show ???
+        ctx.fillStyle = '#554433';
+        ctx.font = 'bold 14px Georgia';
+        ctx.textAlign = 'left';
+        ctx.fillText('???', listX, listY);
+      }
+
+      listY += lineH;
+    }
+
+    ctx.textAlign = 'left';
+  }
+
   // ── Act banner ───────────────────────────────────────────────
   let actBannerText  = '';
   let actBannerTimer = 0;
@@ -1672,13 +2211,15 @@ const UI = (() => {
   let victoryLines   = [];
   let victoryCB      = null;
   let victoryParty   = null;  // party reference for portrait cards
+  let victoryStats   = null;  // battle stats reference
 
-  function showVictory(lines, cb, party) {
+  function showVictory(lines, cb, stats) {
     victoryActive = true;
     victoryTimer  = 4200;
     victoryLines  = lines || [];
     victoryCB     = cb || null;
-    victoryParty  = party || null;
+    victoryParty  = null;
+    victoryStats  = stats || null;
     spawnParticles(W/2, H/3, 'victory', 22);
     spawnParticles(W/4, H/2, 'victory', 12);
     spawnParticles(3*W/4, H/2, 'victory', 12);
@@ -1727,6 +2268,55 @@ const UI = (() => {
       ctx.fillStyle = `rgba(180,255,180,${lineAlpha})`;
       ctx.font = i === 0 ? 'bold 20px Georgia' : '16px Georgia';
       ctx.fillText(victoryLines[i], W/2, 148 + i * 28);
+    }
+
+    // Battle stats box (if provided)
+    if (victoryStats) {
+      const statsY = 240 + victoryLines.length * 28;
+      const boxW = 420, boxH = 120;
+      const boxX = W/2 - boxW/2;
+      ctx.fillStyle = `rgba(8,6,20,${alpha * 0.9})`;
+      roundRect(ctx, boxX, statsY, boxW, boxH, 6); ctx.fill();
+      ctx.strokeStyle = `rgba(200,160,60,${alpha * 0.6})`;
+      ctx.lineWidth = 1;
+      roundRect(ctx, boxX, statsY, boxW, boxH, 6); ctx.stroke();
+
+      ctx.fillStyle = `rgba(255,220,100,${alpha})`;
+      ctx.font = 'bold 14px Georgia';
+      ctx.textAlign = 'center';
+      ctx.fillText('BATTLE STATISTICS', W/2, statsY + 18);
+
+      ctx.font = '12px Georgia';
+      ctx.fillStyle = `rgba(200,200,200,${alpha})`;
+      const statX1 = boxX + 20, statX2 = boxX + 220;
+      let sy = statsY + 38;
+      ctx.textAlign = 'left';
+
+      // Duration
+      const mins = Math.floor(victoryStats.duration / 60);
+      const secs = victoryStats.duration % 60;
+      ctx.fillText(`Duration: ${mins}:${secs.toString().padStart(2,'0')}`, statX1, sy);
+      sy += 20;
+
+      // Turns
+      ctx.fillText(`Turns Taken: ${victoryStats.turnsTaken || 0}`, statX1, sy);
+      sy += 20;
+
+      // Items used
+      ctx.fillText(`Items Used: ${victoryStats.itemsUsed || 0}`, statX1, sy);
+      sy += 20;
+
+      // Enemies defeated
+      ctx.fillText(`Enemies Defeated: ${victoryStats.enemiesDefeated || 0}`, statX1, sy);
+
+      // Damage stats column 2
+      sy = statsY + 38;
+      let totalDealt = 0, totalTaken = 0;
+      for (const k in victoryStats.damageDealt) totalDealt += victoryStats.damageDealt[k];
+      for (const k in victoryStats.damageTaken) totalTaken += victoryStats.damageTaken[k];
+      ctx.fillText(`Damage Dealt: ${totalDealt}`, statX2, sy);
+      sy += 20;
+      ctx.fillText(`Damage Taken: ${totalTaken}`, statX2, sy);
     }
 
     // Party portrait row (if provided)
@@ -2173,6 +2763,7 @@ const UI = (() => {
     // menu
     openMenu, closeMenu, isMenuOpen, updateMenu, drawMenu,
     setSaveCallback: (fn) => { menuSaveCallback = fn; },
+    setBestiaryCallback: (fn) => { menuBestiaryCallback = fn; },
     // act banner
     showActBanner, updateActBanner, drawActBanner,
     // notif
