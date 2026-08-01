@@ -95,6 +95,7 @@ const BATTLE = (() => {
   function startBattle(battleDef, partyState, cb, difficultyMode, consumables) {
     units           = [];
     floatingTexts   = [];
+    if (UI.clearProjectiles) UI.clearProjectiles();
     selectedSkillKey = null;
     selectedItemKey = null;
     moveHighlight   = [];
@@ -492,6 +493,7 @@ const BATTLE = (() => {
     });
 
     UI.updateParticles(dt);
+    UI.updateProjectiles(dt);
     UI.updateShake();
     UI.updateBattleQuote(dt);  // Update battle banter quotes
 
@@ -1511,7 +1513,23 @@ const BATTLE = (() => {
     addFloat(target, `-${dmg}`, color);
     // Element-aware impact burst (falls back to melee/magic default).
     const impactType = elementParticle(sk && sk.element, dmgType);
-    UI.spawnParticles(GRID_X+target.col*CELL+CELL/2, GRID_Y+target.row*CELL+CELL/2, impactType, 6);
+    const tcx = GRID_X+target.col*CELL+CELL/2, tcy = GRID_Y+target.row*CELL+CELL/2;
+    const impact = () => UI.spawnParticles(tcx, tcy, impactType, 6);
+
+    // Ranged / non-adjacent hits get a traveling bolt from caster → target so
+    // the damage reads as coming from somewhere, not appearing out of thin air.
+    // Melee (adjacent) keeps the instant burst. Bolt is decorative; damage is
+    // already applied above — the burst just lands in sync on arrival.
+    const hasPos = caster && Number.isInteger(caster.col) && Number.isInteger(caster.row);
+    const cheb = hasPos ? Math.max(Math.abs(caster.col-target.col), Math.abs(caster.row-target.row)) : 1;
+    if (hasPos && cheb > 1) {
+      const style = (sk && sk.element) ? sk.element : (dmgType==='magic' ? 'arcane' : 'blade');
+      UI.spawnProjectile(
+        GRID_X+caster.col*CELL+CELL/2, GRID_Y+caster.row*CELL+CELL/2,
+        tcx, tcy, style, impact);
+    } else {
+      impact();
+    }
 
     // Kill impact — a satisfying beat when a unit falls
     if (target.dead) {
@@ -1943,6 +1961,7 @@ const BATTLE = (() => {
     drawGrade();          // cinematic color grade + vignette over the diorama
     drawFloatingTexts();
     UI.drawParticles();
+    UI.drawProjectiles();
     drawPanel();
     UI.drawBattleQuote();  // Draw battle banter quotes
 

@@ -75,6 +75,100 @@ const UI = (() => {
     ctx.shadowBlur  = 0;
   }
 
+  // ── Projectiles ─────────────────────────────────────────────
+  // Decorative bolts that travel from a caster to a target for ranged /
+  // non-adjacent attacks, so a hit reads as "it came from over there"
+  // instead of a bare damage number. Purely visual; damage is applied
+  // instantly by battle.js — the bolt is a fast lead-in and an onArrive
+  // callback lands the impact burst in sync.
+  let projectiles = [];
+
+  // Per-element look. Falls back to `arcane` for untyped magic, `blade` melee.
+  const PROJECTILE_STYLES = {
+    fire:      { core:'#ffcc44', edge:'#ff5500', size:5, trail:'fire',      glow:true,  shape:'orb'  },
+    ice:       { core:'#cceeff', edge:'#4488ff', size:5, trail:'ice',       glow:true,  shape:'shard'},
+    lightning: { core:'#ffffff', edge:'#aaaaff', size:3, trail:'lightning', glow:true,  shape:'bolt' },
+    light:     { core:'#ffffff', edge:'#ffdd44', size:5, trail:'holy',      glow:true,  shape:'orb'  },
+    holy:      { core:'#ffffff', edge:'#ffdd44', size:5, trail:'holy',      glow:true,  shape:'orb'  },
+    dark:      { core:'#cc88ff', edge:'#331166', size:5, trail:'void',      glow:true,  shape:'orb'  },
+    void:      { core:'#cc88ff', edge:'#331166', size:5, trail:'void',      glow:true,  shape:'orb'  },
+    arcane:    { core:'#ffaaff', edge:'#aa44ff', size:4, trail:'magic',     glow:true,  shape:'orb'  },
+    blade:     { core:'#ffeecc', edge:'#cc9955', size:3, trail:null,        glow:false, shape:'streak'},
+  };
+
+  // sx,sy → tx,ty in canvas px. `style` is an element/style key above.
+  // onArrive() fires once when the bolt lands.
+  function spawnProjectile(sx, sy, tx, ty, style, onArrive) {
+    const cfg = PROJECTILE_STYLES[style] || PROJECTILE_STYLES.arcane;
+    const dx = tx - sx, dy = ty - sy;
+    const dist = Math.hypot(dx, dy) || 1;
+    // Speed scales gently with distance so long shots don't crawl and short
+    // ones don't teleport; clamp travel to a snappy 120–260ms.
+    const dur = Math.max(120, Math.min(260, dist * 0.9));
+    projectiles.push({
+      x:sx, y:sy, sx, sy, tx, ty,
+      ang: Math.atan2(dy, dx),
+      t:0, dur, cfg, style,
+      onArrive: onArrive || null,
+      arrived:false,
+    });
+  }
+
+  function updateProjectiles(dt) {
+    projectiles = projectiles.filter(p => {
+      p.t += dt;
+      const k = Math.min(1, p.t / p.dur);
+      p.x = p.sx + (p.tx - p.sx) * k;
+      p.y = p.sy + (p.ty - p.sy) * k;
+      // Emit a short trail as it flies.
+      if (p.cfg.trail && Math.random() < 0.6) spawnParticles(p.x, p.y, p.cfg.trail, 1);
+      if (k >= 1 && !p.arrived) {
+        p.arrived = true;
+        if (p.onArrive) p.onArrive();
+        return false;
+      }
+      return k < 1;
+    });
+  }
+
+  function drawProjectiles() {
+    for (const p of projectiles) {
+      const { cfg } = p;
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.ang);
+      if (cfg.glow) { ctx.shadowColor = cfg.edge; ctx.shadowBlur = cfg.size * 3; }
+      if (cfg.shape === 'streak' || cfg.shape === 'bolt') {
+        // Elongated along travel direction.
+        const len = cfg.size * (cfg.shape === 'bolt' ? 5 : 4);
+        const grad = ctx.createLinearGradient(-len, 0, cfg.size, 0);
+        grad.addColorStop(0, 'rgba(0,0,0,0)');
+        grad.addColorStop(1, cfg.edge);
+        ctx.strokeStyle = grad; ctx.lineWidth = cfg.size; ctx.lineCap = 'round';
+        ctx.beginPath(); ctx.moveTo(-len, 0); ctx.lineTo(0, 0); ctx.stroke();
+        ctx.fillStyle = cfg.core;
+        ctx.beginPath(); ctx.arc(0, 0, cfg.size * 0.6, 0, Math.PI*2); ctx.fill();
+      } else if (cfg.shape === 'shard') {
+        ctx.fillStyle = cfg.edge;
+        ctx.beginPath();
+        ctx.moveTo(cfg.size*1.4,0); ctx.lineTo(0,cfg.size); ctx.lineTo(-cfg.size,0); ctx.lineTo(0,-cfg.size);
+        ctx.closePath(); ctx.fill();
+        ctx.fillStyle = cfg.core;
+        ctx.beginPath(); ctx.arc(0,0,cfg.size*0.5,0,Math.PI*2); ctx.fill();
+      } else { // orb
+        const grad = ctx.createRadialGradient(0,0,0, 0,0,cfg.size*1.4);
+        grad.addColorStop(0, cfg.core);
+        grad.addColorStop(1, cfg.edge);
+        ctx.fillStyle = grad;
+        ctx.beginPath(); ctx.arc(0,0,cfg.size*1.4,0,Math.PI*2); ctx.fill();
+      }
+      ctx.restore();
+    }
+    ctx.shadowBlur = 0;
+  }
+
+  function clearProjectiles() { projectiles = []; }
+
   // ── Screen shake ─────────────────────────────────────────────
   let shakeFrames = 0, shakeAmt = 0;
   let shakeX = 0, shakeY = 0;
@@ -2747,6 +2841,8 @@ const UI = (() => {
   return {
     // particles
     spawnParticles, updateParticles, drawParticles,
+    // projectiles
+    spawnProjectile, updateProjectiles, drawProjectiles, clearProjectiles,
     // shake
     screenShake, updateShake, applyShake,
     // portraits
