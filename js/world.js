@@ -177,6 +177,11 @@ const WORLD = (() => {
       if (npc.actMax !== undefined && act > npc.actMax) continue;
       const dist = Math.abs(npc.tx - player.tx) + Math.abs(npc.ty - player.ty);
       if (dist <= 1) {
+        // Shopkeeper: open the merchant instead of dialogue (Phase 3a).
+        if (npc.shop && game && game.openShop) {
+          game.openShop(npc.shop.name || npc.name, npc.shop.stock || []);
+          return;
+        }
         const lines = (npc.lines || [npc.text]).map(t => ({
           name: npc.name, color: npc.color, portrait: npc.portrait || 'none', text: t
         }));

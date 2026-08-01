@@ -1710,6 +1710,172 @@ const UI = (() => {
     ctx.textAlign = 'left';
   }
 
+  // ── Shop (Phase 3a economy) ──────────────────────────────────
+  // A town merchant. main.js owns gold/inventory; the shop calls back to
+  // buy/sell and reads live gold via getters passed at open time.
+  let shopOpen = false;
+  let shopTab  = 0;     // 0 = Buy, 1 = Sell
+  let shopIdx  = 0;
+  let shopApi  = null;  // { getGold, getStock, getSellables, buy, sell, shopName }
+  let shopMsg  = '';    // transient feedback line
+  let shopMsgT = 0;
+
+  function openShop(api) {
+    shopApi  = api;
+    shopOpen = true;
+    shopTab  = 0;
+    shopIdx  = 0;
+    shopMsg  = '';
+    if (typeof AUDIO !== 'undefined' && AUDIO.sfx) AUDIO.sfx.menuOpen();
+  }
+  function closeShop() { shopOpen = false; shopApi = null; }
+  function isShopOpen() { return shopOpen; }
+
+  // Rows currently shown for the active tab.
+  function shopRows() {
+    if (!shopApi) return [];
+    return shopTab === 0 ? shopApi.getStock() : shopApi.getSellables();
+  }
+
+  function setShopMsg(t) { shopMsg = t; shopMsgT = 1600; }
+
+  function updateShop(dt) {
+    if (!shopOpen || !shopApi) return;
+    if (shopMsgT > 0) shopMsgT -= dt; else shopMsg = '';
+
+    if (INPUT.wasPressed('Escape')) { closeShop(); return; }
+    // Left/right (or Q/E) toggles the Buy/Sell tab.
+    if (INPUT.wasPressed('ArrowLeft') || INPUT.wasPressed('q') || INPUT.wasPressed('Q') ||
+        INPUT.wasPressed('ArrowRight')|| INPUT.wasPressed('e') || INPUT.wasPressed('E')) {
+      shopTab = shopTab === 0 ? 1 : 0; shopIdx = 0;
+    }
+    const rows = shopRows();
+    if (INPUT.wasPressed('ArrowUp')   || INPUT.wasPressed('w') || INPUT.wasPressed('W'))
+      shopIdx = Math.max(0, shopIdx - 1);
+    if (INPUT.wasPressed('ArrowDown') || INPUT.wasPressed('s') || INPUT.wasPressed('S'))
+      shopIdx = Math.min(Math.max(0, rows.length - 1), shopIdx + 1);
+
+    const confirm = INPUT.wasPressed('Enter') || INPUT.wasPressed(' ');
+    const click = INPUT.consumeClick();
+    let acted = confirm;
+    if (click) {
+      // Tab clicks
+      if (click.y >= 70 && click.y <= 96) {
+        if (click.x >= 60 && click.x < 200) { shopTab = 0; shopIdx = 0; }
+        else if (click.x >= 200 && click.x < 340) { shopTab = 1; shopIdx = 0; }
+      }
+      // Row click → select; second click / on-row click acts
+      const rowY0 = 120;
+      const ri = Math.floor((click.y - rowY0) / 30);
+      if (ri >= 0 && ri < rows.length && click.x >= 50 && click.x <= 620) {
+        if (shopIdx === ri) acted = true; else shopIdx = ri;
+      }
+      // Exit button (bottom)
+      if (click.x >= W-140 && click.x <= W-40 && click.y >= H-48 && click.y <= H-20) {
+        closeShop(); return;
+      }
+    }
+
+    if (acted && rows[shopIdx]) {
+      const row = rows[shopIdx];
+      if (shopTab === 0) {
+        const r = shopApi.buy(row.key);
+        setShopMsg(r.ok ? `Bought ${row.name}.` : (r.reason || 'Cannot buy.'));
+      } else {
+        const r = shopApi.sell(row.key);
+        setShopMsg(r.ok ? `Sold ${row.name} for ${r.gold}g.` : (r.reason || 'Cannot sell.'));
+        const nr = shopRows();
+        if (shopIdx >= nr.length) shopIdx = Math.max(0, nr.length - 1);
+      }
+    }
+  }
+
+  function drawShop() {
+    if (!shopOpen || !shopApi) return;
+    // Backdrop
+    ctx.fillStyle = 'rgba(10,6,3,0.92)';
+    ctx.fillRect(0, 0, W, H);
+    // Frame
+    ctx.strokeStyle = '#7a5530'; ctx.lineWidth = 2;
+    roundRect(ctx, 30, 24, W-60, H-56, 6); ctx.stroke();
+
+    // Title + gold
+    ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+    ctx.fillStyle = '#e8c877'; ctx.font = 'bold 20px Georgia';
+    ctx.fillText(shopApi.shopName || 'Merchant', 50, 52);
+    ctx.textAlign = 'right';
+    ctx.fillStyle = '#ffdd66'; ctx.font = 'bold 16px Georgia';
+    ctx.fillText(`Gold: ${shopApi.getGold()}`, W-50, 52);
+    ctx.textAlign = 'left';
+
+    // Tabs
+    const tabs = ['Buy', 'Sell'];
+    for (let i = 0; i < 2; i++) {
+      const tx = 60 + i * 140, ty = 70;
+      ctx.fillStyle = shopTab === i ? '#5a3d1f' : 'rgba(40,28,16,0.6)';
+      roundRect(ctx, tx, ty, 130, 26, 4); ctx.fill();
+      ctx.strokeStyle = shopTab === i ? '#c89b4a' : '#4a3520'; ctx.lineWidth = 1;
+      roundRect(ctx, tx, ty, 130, 26, 4); ctx.stroke();
+      ctx.fillStyle = shopTab === i ? '#ffe9b0' : '#998866';
+      ctx.font = '14px Georgia'; ctx.textAlign = 'center';
+      ctx.fillText(tabs[i], tx + 65, ty + 18);
+    }
+    ctx.textAlign = 'left';
+
+    // Rows
+    const rows = shopRows();
+    const rowY0 = 120;
+    if (rows.length === 0) {
+      ctx.fillStyle = '#887766'; ctx.font = 'italic 14px Georgia';
+      ctx.fillText(shopTab === 0 ? 'Nothing in stock.' : 'You have nothing to sell.', 60, rowY0 + 20);
+    }
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i], y = rowY0 + i * 30;
+      const sel = i === shopIdx;
+      if (sel) { ctx.fillStyle = 'rgba(120,80,30,0.45)'; roundRect(ctx, 46, y-2, 578, 28, 4); ctx.fill(); }
+      ctx.fillStyle = sel ? '#ffe9b0' : '#ccbb99'; ctx.font = '14px Georgia';
+      ctx.fillText(r.name + (r.count ? ` ×${r.count}` : ''), 56, y + 16);
+      ctx.fillStyle = '#99aa88'; ctx.font = '11px Georgia';
+      ctx.fillText(r.desc || '', 250, y + 16);
+      // Price (buy = full, sell = half shown)
+      ctx.textAlign = 'right';
+      ctx.fillStyle = shopTab === 0
+        ? (shopApi.getGold() >= r.price ? '#ffdd66' : '#aa5544')
+        : '#88cc88';
+      ctx.font = 'bold 13px Georgia';
+      ctx.fillText(`${shopTab === 0 ? r.price : Math.floor(r.price/2)}g`, 616, y + 16);
+      ctx.textAlign = 'left';
+    }
+
+    // Detail / stats of the selected item
+    const selRow = rows[shopIdx];
+    if (selRow) {
+      ctx.strokeStyle = '#4a3520'; ctx.lineWidth = 1;
+      roundRect(ctx, 640, 116, W-690, H-176, 5); ctx.stroke();
+      ctx.fillStyle = '#e8c877'; ctx.font = 'bold 13px Georgia';
+      ctx.fillText(selRow.name, 654, 138);
+      ctx.fillStyle = '#bbaa88'; ctx.font = '11px Georgia';
+      ctx.fillText(selRow.desc || '', 654, 158);
+      if (selRow.chars) {
+        ctx.fillStyle = '#8899aa';
+        ctx.fillText('For: ' + selRow.chars.join(', '), 654, 200);
+      }
+    }
+
+    // Message + controls
+    if (shopMsg) {
+      ctx.fillStyle = '#ffcc66'; ctx.font = 'italic 13px Georgia';
+      ctx.fillText(shopMsg, 50, H-58);
+    }
+    ctx.fillStyle = '#777'; ctx.font = '11px Georgia';
+    ctx.fillText('↑↓ Select  ·  ←→ Buy/Sell  ·  Enter Confirm  ·  Esc Leave', 50, H-30);
+    // Exit button
+    ctx.fillStyle = 'rgba(80,30,20,0.7)'; roundRect(ctx, W-140, H-48, 100, 28, 4); ctx.fill();
+    ctx.strokeStyle = '#aa5544'; roundRect(ctx, W-140, H-48, 100, 28, 4); ctx.stroke();
+    ctx.fillStyle = '#ffbbaa'; ctx.font = '13px Georgia'; ctx.textAlign = 'center';
+    ctx.fillText('Leave', W-90, H-30); ctx.textAlign = 'left';
+  }
+
   // ── World HUD ────────────────────────────────────────────────
   function drawWorldHUD(party, locationName, actProgress) {
     // Location name (bottom left) with fade
@@ -2843,6 +3009,8 @@ const UI = (() => {
     spawnParticles, updateParticles, drawParticles,
     // projectiles
     spawnProjectile, updateProjectiles, drawProjectiles, clearProjectiles,
+    // shop
+    openShop, updateShop, drawShop, isShopOpen, closeShop,
     // shake
     screenShake, updateShake, applyShake,
     // portraits

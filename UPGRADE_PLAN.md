@@ -98,7 +98,7 @@ Progress: **battle pass ✅ · overworld grade ✅ (done & verified).** DOF/para
 
 Files: `js/data.js`, `js/world.js`, `js/ui.js`, `js/main.js`.
 
-- **3a. Economy (no gold code exists today):** add `gold` to state+save; enemies/chests award it; **shops** in towns (buy/sell using existing `EQUIPMENT`/`CONSUMABLES`). **Shrines heal Wounded** — the gold-sink that makes positioning matter.
+- **3a. Economy — ✅ shops+gold DONE (shrines pending Wounded):** `gold` in state+save (v2.1, default-filled); enemies award derived gold on kill (tallied in `battleStats.goldEarned`, banked in `persistBattleStats`, shown on the victory screen); items carry a `price` (consumables hand-set, equipment auto-derived from stat power). **Shop** = a `SHOP` state + `UI.openShop/updateShop/drawShop`; a shopkeeper NPC (`shop:{...}` in `data.js`, Selvara Quartermaster) opens it via `game.openShop` from `world.js`. Buy (full price) / Sell (half) tabs, keyboard+click nav, equipped-gear sell guard. Verified in-browser: buy 300→270, sell →312, zero errors. **Shrines heal Wounded** — deferred until the Wounded status lands (below); shrine is the gold-sink that makes positioning matter.
 - **3b. Path/Field Actions (FFT/Octopath overworld):** per-character NPC interactions — Kael *Challenge*, Lyra *Pickpocket*, Theron *Intimidate*, Sera *Inquire* — gated by level/gold/bond.
 - **3c. Town NPCs & side stories:** backstories + optional quests/side battles reusing the act/battle pipeline.
 - **3d. Disciplines (FFT jobs):** optional secondary skill set per character, unlockable mid-game.

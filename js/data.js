@@ -123,6 +123,13 @@ const DATA = (() => {
               "...She left a note. She fled Aldric's conscription of traders. She's safe. I just... I miss her.",
               "Thank you for checking. Here — take this. It's no use to me in grief."],
       actMin:3, actMax:99, id:'merchant' },
+    // Shopkeeper — opens the town shop (Phase 3a economy).
+    { tx:29, ty:8,  name:'Selvara Quartermaster', color:'#e0b060', portrait:'none',
+      actMin:3, actMax:99, id:'selvaraShop',
+      shop:{ name:"Selvara Quartermaster",
+             stock:['hp_potion','mp_potion','antidote','sunflare_vial','elixir',
+                    'knightSword','mistCloak','soldierHelm','focusLens','wardingStone',
+                    'thievesBelt','forestShardAmulet'] } },
 
     // Ruins
     { tx:25, ty:9,  name:'Ghost of a Scholar', color:'#8888cc', portrait:'none',
@@ -255,16 +262,16 @@ const DATA = (() => {
 
   // ── Consumable items ─────────────────────────────────────────
   const CONSUMABLES = {
-    hp_potion:   { name:'HP Potion',   desc:'Restore 50 HP',           healHp:50 },
-    mp_potion:   { name:'MP Potion',   desc:'Restore 30 MP',           healMp:30 },
-    antidote:    { name:'Antidote',    desc:'Cure poison',             cure:'poison' },
-    elixir:      { name:'Elixir',      desc:'Restore 80 HP + 40 MP',  healHp:80, healMp:40 },
-    phoenix_ash: { name:'Phoenix Ash', desc:'Revive ally at 40% HP',  reviveHp:0.4 },
+    hp_potion:   { name:'HP Potion',   desc:'Restore 50 HP',           healHp:50,   price:30 },
+    mp_potion:   { name:'MP Potion',   desc:'Restore 30 MP',           healMp:30,   price:25 },
+    antidote:    { name:'Antidote',    desc:'Cure poison',             cure:'poison', price:15 },
+    elixir:      { name:'Elixir',      desc:'Restore 80 HP + 40 MP',  healHp:80, healMp:40, price:80 },
+    phoenix_ash: { name:'Phoenix Ash', desc:'Revive ally at 40% HP',  reviveHp:0.4, price:120 },
     // Offensive throwable — anyone can hurl it. Light element, so it exploits
     // light-weak foes and chips guard toward a Stagger (routed through applyHit
     // in battle.js). The early answer to enemies the party's weapons can't probe.
     sunflare_vial: { name:'Sunflare Vial', desc:'Hurl light damage at a foe',
-                     dmg:20, element:'light', offensive:true },
+                     dmg:20, element:'light', offensive:true, price:40 },
   };
 
   function rollDrops(dropsArray) {
@@ -310,6 +317,20 @@ const DATA = (() => {
     wardingStone:      { name:'Warding Stone',     slot:'accessory',chars:['Kael','Theron','Sera'], maxHp:10, desc:'+10 HP' },
     crimsonSeal:       { name:'Crimson Seal',      slot:'accessory',chars:['Kael','Lyra','Theron','Sera'], luck:4, maxMp:5, desc:'+4 LUCK +5 MP' },
   };
+
+  // Phase 3a economy: derive a buy price from stat power so every item is
+  // shop-tradeable and new items auto-price. A manual `price` on an item wins.
+  // Weighted stat total × slot factor, floored to a tidy number.
+  const _STAT_WEIGHT = { atk:9, mag:9, def:8, spd:7, luck:5, maxHp:2, maxMp:2 };
+  const _SLOT_FACTOR = { weapon:1.2, armor:1.1, accessory:1.0 };
+  for (const key in EQUIPMENT) {
+    const it = EQUIPMENT[key];
+    if (it.price != null) continue;
+    let power = 0;
+    for (const s in _STAT_WEIGHT) power += (it[s] || 0) * _STAT_WEIGHT[s];
+    const raw = power * (_SLOT_FACTOR[it.slot] || 1);
+    it.price = Math.max(20, Math.round(raw / 5) * 5);  // round to nearest 5, min 20
+  }
 
   // ── Counter Web ──────────────────────────────────────────────
   // Weapon-type advantage (FE-style triangle, extended) + elements.
@@ -634,6 +655,16 @@ const DATA = (() => {
       reviveTriggered: false,
     },
   };
+
+  // Phase 3a economy: gold dropped on kill, derived from toughness so it scales
+  // across the game and new enemies auto-value. Bosses pay a premium. A manual
+  // `gold` on a template wins.
+  for (const key in ENEMY_TEMPLATES) {
+    const e = ENEMY_TEMPLATES[key];
+    if (e.gold != null) continue;
+    const base = Math.round(((e.maxHp || 40) * 0.15 + (e.atk || 0) + (e.mag || 0)) / 2);
+    e.gold = e.isBoss ? Math.round(base * 3) : Math.max(4, base);
+  }
 
   // ── Battle EXP awards ────────────────────────────────────────
   const BATTLE_EXP = {

@@ -415,8 +415,9 @@ const BATTLE = (() => {
     }
     if (enemyAlive.length === 0) {
       phase = 'victory';
-      // Collect drops from defeated enemies
+      // Collect drops + gold from defeated enemies
       battleDrops = [];
+      battleStats.goldEarned = 0;
       for (const u of units) {
         if (!u.isPlayer && u.dead && u.templateKey) {
           const tmpl = DATA.ENEMY_TEMPLATES[u.templateKey];
@@ -424,6 +425,7 @@ const BATTLE = (() => {
             const drops = DATA.rollDrops(tmpl.drops);
             battleDrops.push(...drops);
           }
+          if (tmpl && tmpl.gold) battleStats.goldEarned += tmpl.gold;
         }
       }
       // Victory banter

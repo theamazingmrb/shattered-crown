@@ -40,6 +40,8 @@ const GAME = (() => {
     mp_potion: 1,
   };
   let bestiary = {};        // enemy key -> { count, seen: bool }
+  let gold = 0;             // Phase 3a economy: spent at town shops
+  let lastGoldEarned = 0;   // gold from the most recent battle (victory display)
   let lastBattleDef = null;
   let finalChoiceResult = null;  // 0=Path A Keeper, 1=Path B Swap
   let varethChoiceResult = null; // 0=resist, 1=accept
@@ -84,8 +86,9 @@ const GAME = (() => {
   // ── Save / Load helpers ───────────────────────────────────────
   function saveGame(slot) {
     const data = {
-      version: '2.0',
+      version: '2.1',
       savedAt: Date.now(),
+      gold,
       actProgress,
       actTriggered,
       finalChoiceResult,
@@ -130,6 +133,7 @@ const GAME = (() => {
     inventory          = save.inventory      || [];
     partyInventory     = save.partyInventory  || { hp_potion: 2, mp_potion: 1 };
     bestiary           = save.bestiary        || {};
+    gold               = save.gold            || 0;   // v2.1; old saves default to 0
 
     // Rebuild party from save
     party = [];
@@ -212,6 +216,70 @@ const GAME = (() => {
     }
   }
 
+  // ── Shop (Phase 3a economy) ──────────────────────────────────
+  // Open a town merchant. `stock` is an array of item keys the shop sells
+  // (equipment or consumables). main owns gold/inventory mutations; UI just
+  // renders and calls these callbacks.
+  function openShop(shopName, stock) {
+    // A row for the shop UI: unify equipment + consumables.
+    const rowFor = (key) => {
+      const eq = DATA.EQUIPMENT[key], cons = DATA.CONSUMABLES[key];
+      const src = eq || cons; if (!src) return null;
+      return { key, name: src.name, desc: src.desc, price: src.price || 0,
+               chars: eq ? eq.chars : null, isConsumable: !!cons };
+    };
+    state = 'SHOP';
+    UI.openShop({
+      shopName,
+      getGold: () => gold,
+      // Buy list: the shop's fixed stock (equipment shown only if not already owned).
+      getStock: () => stock.map(rowFor).filter(r => r &&
+        (r.isConsumable || !inventory.includes(r.key))),
+      // Sell list: consumables in partyInventory + equipment in inventory (unequipped-tradeable).
+      getSellables: () => {
+        const out = [];
+        for (const k in partyInventory) {
+          const r = rowFor(k); if (r) { r.count = partyInventory[k]; out.push(r); }
+        }
+        for (const k of inventory) {
+          const r = rowFor(k); if (r) out.push(r);
+        }
+        return out;
+      },
+      buy: (key) => {
+        const r = rowFor(key); if (!r) return { ok:false, reason:'No such item.' };
+        if (gold < r.price) return { ok:false, reason:'Not enough gold.' };
+        if (r.isConsumable) {
+          partyInventory[key] = (partyInventory[key] || 0) + 1;
+        } else {
+          if (inventory.includes(key)) return { ok:false, reason:'Already owned.' };
+          inventory.push(key);
+        }
+        gold -= r.price;
+        AUDIO.sfx.chestOpen && AUDIO.sfx.chestOpen();
+        return { ok:true };
+      },
+      sell: (key) => {
+        const r = rowFor(key); if (!r) return { ok:false, reason:'No such item.' };
+        const value = Math.floor((r.price || 0) / 2);
+        if (r.isConsumable) {
+          if (!partyInventory[key]) return { ok:false, reason:'None to sell.' };
+          partyInventory[key]--; if (partyInventory[key] <= 0) delete partyInventory[key];
+        } else {
+          const idx = inventory.indexOf(key);
+          if (idx < 0) return { ok:false, reason:'Not owned.' };
+          // Don't sell gear currently equipped by a party member.
+          if (party.some(p => p.equipment && Object.values(p.equipment).includes(key)))
+            return { ok:false, reason:'Currently equipped.' };
+          inventory.splice(idx, 1);
+        }
+        gold += value;
+        AUDIO.sfx.chestOpen && AUDIO.sfx.chestOpen();
+        return { ok:true, gold:value };
+      },
+    });
+  }
+
   // NOTE: battle start/end lives in the "Battle start / end" section below
   // (startBattle / onBattleEnd / onBattleDefeat / retryBattle). An earlier
   // duplicate set of these was removed — the versions below are the live ones.
@@ -229,6 +297,7 @@ const GAME = (() => {
         // they're the early tool for probing light-weak foes (e.g. the B2 wraith).
         partyInventory     = { hp_potion: 2, mp_potion: 1, sunflare_vial: 2 };
         bestiary           = {};
+        gold               = 50;   // a small purse to start
         actProgress        = 0;
         actTriggered       = {};
         finalChoiceResult  = null;
@@ -660,6 +729,9 @@ const GAME = (() => {
   // weaknesses the party discovered. Safe to call with partial/undefined stats.
   function persistBattleStats(stats) {
     if (!stats) return;
+    // Phase 3a: bank gold earned this battle (used by the victory screen).
+    lastGoldEarned = stats.goldEarned || 0;
+    gold += lastGoldEarned;
     for (const key of (stats.enemiesSeen || [])) {
       if (!bestiary[key]) bestiary[key] = { seen: true, count: 0 };
     }
@@ -691,7 +763,8 @@ const GAME = (() => {
     if (expLines.some(l => l.includes('Level') || l.includes('Learned')))
       setTimeout(() => AUDIO.sfx.levelUp(), 600);
 
-    UI.showVictory([`+${expAmount} EXP`, ...expLines], () => {
+    const goldLine = lastGoldEarned > 0 ? [`+${lastGoldEarned} Gold`] : [];
+    UI.showVictory([`+${expAmount} EXP`, ...goldLine, ...expLines], () => {
       UI.fadeOut(() => {
         state = 'WORLD';
         AUDIO.crossfadeTo('world', 1200);
@@ -929,8 +1002,14 @@ const GAME = (() => {
             party,
             actProgress,
             collectItem,
+            openShop,
           });
         }
+        break;
+
+      case 'SHOP':
+        UI.updateShop(dt);
+        if (!UI.isShopOpen()) state = 'WORLD';
         break;
 
       case 'BATTLE':
@@ -980,6 +1059,17 @@ const GAME = (() => {
           UI.drawFade();
         } catch (err) {
           console.error('[DRAW ERROR] Error drawing WORLD state:', err);
+        }
+        break;
+
+      case 'SHOP':
+        try {
+          WORLD.draw(actProgress);            // town visible behind the shop
+          UI.drawShop();
+          UI.drawNotif();
+          UI.drawFade();
+        } catch (err) {
+          console.error('[DRAW ERROR] Error drawing SHOP state:', err);
         }
         break;
 
