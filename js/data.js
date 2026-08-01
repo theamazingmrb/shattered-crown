@@ -251,6 +251,23 @@ const DATA = (() => {
     { id:'chest6', tx:20, ty:6,  item:'runicArmor',          label:'Runic Armor',           actMin:6 },
   ];
 
+  // ── Consumable items ─────────────────────────────────────────
+  const CONSUMABLES = {
+    hp_potion:   { name:'HP Potion',   desc:'Restore 50 HP',           healHp:50 },
+    mp_potion:   { name:'MP Potion',   desc:'Restore 30 MP',           healMp:30 },
+    antidote:    { name:'Antidote',    desc:'Cure poison',             cure:'poison' },
+    elixir:      { name:'Elixir',      desc:'Restore 80 HP + 40 MP',  healHp:80, healMp:40 },
+    phoenix_ash: { name:'Phoenix Ash', desc:'Revive ally at 40% HP',  reviveHp:0.4 },
+  };
+
+  function rollDrops(dropsArray) {
+    const results = [];
+    for (const d of (dropsArray || [])) {
+      if (Math.random() < d.chance) results.push({ key: d.item, count: d.count || 1 });
+    }
+    return results;
+  }
+
   // ── Equipment definitions ────────────────────────────────────
   const EQUIPMENT = {
     // Weapons
@@ -287,17 +304,95 @@ const DATA = (() => {
     crimsonSeal:       { name:'Crimson Seal',      slot:'accessory',chars:['Kael','Lyra','Theron','Sera'], luck:4, maxMp:5, desc:'+4 LUCK +5 MP' },
   };
 
+  // ── Counter Web ──────────────────────────────────────────────
+  // Weapon-type advantage (FE-style triangle, extended) + elements.
+  // WEAPON_BEATS[a] = types that `a` has advantage over (×1.25).
+  const WEAPON_BEATS = {
+    sword: ['axe'],
+    axe:   ['lance'],
+    lance: ['sword'],
+    dagger:['staff', 'bow'],   // fast weapons punish the fragile
+    bow:   ['lance', 'axe'],   // range punishes heavies
+    staff: ['sword', 'axe'],   // magic weapons punish armor
+  };
+  const ELEMENTS = ['fire','ice','lightning','wind','light','dark'];
+
+  // Returns a damage multiplier for an attack's weapon/element vs a defender's
+  // weaknesses/resistances. Result stacks weapon + element independently.
+  //   defender.weak    : array of weaponTypes/elements taking ×1.25
+  //   defender.resist  : array of weaponTypes/elements taking ×0.75 (weapon)
+  //                      or ×0.5 (element)
+  //   defender.guardType: weaponType whose *counter* it is weak to (FE triangle)
+  function counterMult(attack, defender) {
+    let mult = 1;
+    const w = attack.weaponType, e = attack.element;
+    // Weapon triangle vs the defender's guardType
+    if (w && defender.guardType && (WEAPON_BEATS[w] || []).includes(defender.guardType)) mult *= 1.25;
+    else if (w && defender.guardType && (WEAPON_BEATS[defender.guardType] || []).includes(w)) mult *= 0.75;
+    // Explicit weak/resist lists (weapon OR element token)
+    const weak   = defender.weak   || [];
+    const resist = defender.resist || [];
+    if (w && weak.includes(w))   mult *= 1.25;
+    if (w && resist.includes(w)) mult *= 0.75;
+    if (e && e !== 'none' && weak.includes(e))   mult *= 1.25;
+    if (e && e !== 'none' && resist.includes(e)) mult *= 0.5;
+    return mult;
+  }
+
+  // ── Positioning (Phase 1b) ───────────────────────────────────
+  // Back-attack: attacker is on the side the target is facing AWAY from → +30%.
+  // On this horizontal grid, a unit facing 'R' is vulnerable from its left
+  // (attacker.col < target.col) and vice-versa.
+  function backAttackMult(attacker, target) {
+    if (attacker.col == null || target.col == null || !target.facing) return 1;
+    if (target.facing === 'R' && attacker.col < target.col) return 1.30;
+    if (target.facing === 'L' && attacker.col > target.col) return 1.30;
+    return 1;
+  }
+  // Flanking: an ally of the attacker sits on the opposite side of the target
+  // (target sandwiched horizontally) → +20% and helps break.
+  function isFlanked(attacker, target, units) {
+    if (attacker.col == null || target.col == null) return false;
+    const side = Math.sign(attacker.col - target.col); // attacker's side of target
+    if (side === 0) return false;
+    return units.some(u =>
+      u !== attacker && !u.dead && u.isPlayer === attacker.isPlayer &&
+      u.row === target.row && Math.sign(u.col - target.col) === -side &&
+      Math.abs(u.col - target.col) <= 2);
+  }
+
+  // Support Bond: count orthogonally-adjacent living allies of `unit`.
+  // Each adjacent ally grants a small defensive bonus (see battle.js).
+  function adjacentAllies(unit, units) {
+    if (unit.col == null) return 0;
+    return units.filter(u =>
+      u !== unit && !u.dead && u.isPlayer === unit.isPlayer &&
+      (Math.abs(u.col - unit.col) + Math.abs(u.row - unit.row)) === 1).length;
+  }
+
+  // What tokens (weapon + element) a defender is weak to — for UI probing.
+  function weaknessTokens(defender) {
+    const set = new Set(defender.weak || []);
+    // Triangle-derived weapon weakness
+    if (defender.guardType) {
+      for (const wt in WEAPON_BEATS) {
+        if (WEAPON_BEATS[wt].includes(defender.guardType)) set.add(wt);
+      }
+    }
+    return [...set];
+  }
+
   // ── Skill definitions ────────────────────────────────────────
   const SKILLS = {
     // ===== KAEL =====
     slash: {
       name:'Slash', type:'physical', target:'single', mult:1.5, mp:0,
-      range:1, levelReq:1,
+      range:1, levelReq:1, weaponType:'sword',
       desc:'1.5x ATK, adjacent only'
     },
     shieldBash: {
       name:'Shield Bash', type:'physical', target:'single', mult:0.8, mp:8,
-      range:1, effect:'stun', levelReq:1,
+      range:1, effect:'stun', levelReq:1, weaponType:'sword',
       desc:'0.8x ATK + stun 1 turn'
     },
     rally: {
@@ -307,7 +402,7 @@ const DATA = (() => {
     },
     bladeStorm: {
       name:'Blade Storm', type:'physical', target:'adjAll', mult:1.2, mp:20,
-      range:1, levelReq:3,
+      range:1, levelReq:3, weaponType:'sword',
       desc:'1.2x ATK all adjacent enemies'
     },
     royalGuard: {
@@ -317,14 +412,14 @@ const DATA = (() => {
     },
     starlightStrike: {
       name:'Starlight Strike', type:'hybrid', target:'single', mult:3.0, mp:35,
-      magMult:1.0, range:1, levelReq:10,
+      magMult:1.0, range:1, levelReq:10, weaponType:'sword', element:'light',
       desc:'3x ATK + 1x MAG — the shard awakes'
     },
 
     // ===== LYRA =====
     stab: {
       name:'Stab', type:'physical', target:'single', mult:2.0, mp:0,
-      range:1, levelReq:1,
+      range:1, levelReq:1, weaponType:'dagger',
       desc:'2x ATK'
     },
     shadowStep: {
@@ -334,7 +429,7 @@ const DATA = (() => {
     },
     poisonBlade: {
       name:'Poison Blade', type:'physical', target:'single', mult:1.0, mp:12,
-      range:1, effect:'poison', poisonDmg:8, poisonTurns:4, levelReq:1,
+      range:1, effect:'poison', poisonDmg:8, poisonTurns:4, levelReq:1, weaponType:'dagger',
       desc:'ATK + poison 8/turn for 4 turns'
     },
     smokeBomb: {
@@ -344,7 +439,7 @@ const DATA = (() => {
     },
     assassinate: {
       name:'Assassinate', type:'physical', target:'single', mult:3.0, mp:30,
-      range:1, requiresUnacted:true, levelReq:6,
+      range:1, requiresUnacted:true, levelReq:6, weaponType:'dagger',
       desc:'3x ATK — only if target has not acted this round'
     },
     twinShadow: {
@@ -356,12 +451,12 @@ const DATA = (() => {
     // ===== THERON =====
     fireball: {
       name:'Fireball', type:'magic', target:'single', mult:2.0, mp:12,
-      range:99, levelReq:1,
+      range:99, levelReq:1, element:'fire',
       desc:'2x MAG single target fire'
     },
     blizzard: {
       name:'Blizzard', type:'magic', target:'aoe3x3', mult:1.2, mp:22,
-      range:99, effect:'freeze', levelReq:1,
+      range:99, effect:'freeze', levelReq:1, element:'ice',
       desc:'1.2x MAG in 3x3 area, may freeze'
     },
     arcaneShield: {
@@ -371,7 +466,7 @@ const DATA = (() => {
     },
     gravityWell: {
       name:'Gravity Well', type:'magic', target:'single', mult:1.0, mp:20,
-      range:99, effect:'pull', pullRadius:3, levelReq:3,
+      range:99, effect:'pull', pullRadius:3, levelReq:3, element:'dark',
       desc:'Pull all enemies within 3 cells, 1x MAG each'
     },
     shardInfusion: {
@@ -381,7 +476,7 @@ const DATA = (() => {
     },
     supernova: {
       name:'Supernova', type:'magic', target:'allEnemy', mult:2.5, mp:50,
-      recoilPct:0.2, levelReq:10,
+      recoilPct:0.2, levelReq:10, element:'fire',
       desc:'2.5x MAG ALL enemies — Theron takes 20% max HP recoil'
     },
 
@@ -393,7 +488,7 @@ const DATA = (() => {
     },
     holyLight: {
       name:'Holy Light', type:'magic', target:'single', mult:2.5, mp:18,
-      range:99, vsCorrupted:true, levelReq:1,
+      range:99, vsCorrupted:true, levelReq:1, element:'light',
       desc:'2.5x MAG vs dark/corrupted enemies'
     },
     resurrection: {
@@ -418,9 +513,9 @@ const DATA = (() => {
     },
 
     // ===== ENEMY SKILLS =====
-    eStrike:        { name:'Strike',          type:'physical', target:'single', mult:1.0, mp:0, range:1 },
-    eHeavyBlow:     { name:'Heavy Blow',      type:'physical', target:'single', mult:2.0, mp:0, range:1 },
-    eWail:          { name:'Wail',            type:'magic',    target:'single', mult:1.5, mp:0, range:99 },
+    eStrike:        { name:'Strike',          type:'physical', target:'single', mult:1.0, mp:0, range:1, weaponType:'sword' },
+    eHeavyBlow:     { name:'Heavy Blow',      type:'physical', target:'single', mult:2.0, mp:0, range:1, weaponType:'axe' },
+    eWail:          { name:'Wail',            type:'magic',    target:'single', mult:1.5, mp:0, range:99, element:'dark' },
     eCurse:         { name:'Curse',           type:'debuff',   target:'single', mult:0,   mp:0, range:99,  effect:'defDebuff', buffAmt:-0.3, buffTurns:2 },
     eSuppress:      { name:'Suppress',        type:'physical', target:'single', mult:1.0, mp:0, range:1,   effect:'stun' },
     ePlagueTch:     { name:'Plague Touch',    type:'physical', target:'single', mult:1.0, mp:0, range:1,   effect:'poison', poisonDmg:5, poisonTurns:3 },
@@ -489,33 +584,34 @@ const DATA = (() => {
 
   // ── Enemy templates ──────────────────────────────────────────
   const ENEMY_TEMPLATES = {
-    bandit:          { name:'Bandit',           color:'#996633', maxHp:50,  atk:14, def:6,  mag:2,  spd:7,  luck:2, move:3, skills:['eStrike'],                               isPlayer:false, aiType:'aggressive' },
-    banditCaptain:   { name:'Bandit Captain',   color:'#cc4422', maxHp:90,  atk:18, def:10, mag:3,  spd:8,  luck:3, move:3, skills:['eStrike','eHeavyBlow'],                   isPlayer:false, aiType:'aggressive' },
-    corruptSpirit:   { name:'Corrupt Spirit',   color:'#44aaaa', maxHp:60,  atk:8,  def:4,  mag:18, spd:12, luck:4, move:4, skills:['eWail','eCurse'],                         isPlayer:false, aiType:'tactical'   },
-    wraith:          { name:'Wraith',           color:'#225588', maxHp:45,  atk:5,  def:2,  mag:22, spd:15, luck:3, move:5, skills:['eRealityTear','ePhase'],                  isPlayer:false, aiType:'tactical', ignoresTerrain:true },
-    enforcer:        { name:'Enforcer',         color:'#778877', maxHp:80,  atk:16, def:12, mag:4,  spd:8,  luck:3, move:3, skills:['eStrike','eSuppress'],                    isPlayer:false, aiType:'aggressive' },
-    enforcerCaptain: { name:'Enf.Captain',      color:'#557755', maxHp:120, atk:20, def:14, mag:5,  spd:9,  luck:3, move:3, skills:['eStrike','eHeavyBlow','ePlagueTch'],      isPlayer:false, aiType:'tactical'   },
-    thief:           { name:'Thief',            color:'#886644', maxHp:65,  atk:17, def:7,  mag:4,  spd:13, luck:6, move:4, skills:['eBackstab','ePilfer'],                    isPlayer:false, aiType:'aggressive' },
-    thiefBoss:       { name:'Thief Boss',       color:'#aa7733', maxHp:110, atk:22, def:10, mag:6,  spd:14, luck:7, move:5, skills:['eBackstab','eSmokeScr'],                  isPlayer:false, aiType:'tactical'   },
-    assassin:        { name:'Assassin',         color:'#222255', maxHp:70,  atk:20, def:8,  mag:5,  spd:16, luck:8, move:5, skills:['eShadowStrike','eVanish'],                isPlayer:false, aiType:'aggressive' },
-    shadowMaster:    { name:'Shadow Master',    color:'#334466', maxHp:140, atk:18, def:12, mag:14, spd:12, luck:5, move:4, skills:['eDarkBlade','eNightmare','eCommand'],      isPlayer:false, aiType:'tactical'   },
-    castleGuard:     { name:'Castle Guard',     color:'#9999bb', maxHp:90,  atk:17, def:15, mag:3,  spd:8,  luck:2, move:3, skills:['eShieldStrike','eFormation'],             isPlayer:false, aiType:'aggressive' },
-    castleGuardCap:  { name:'Guard Captain',    color:'#7777aa', maxHp:130, atk:22, def:18, mag:5,  spd:9,  luck:3, move:3, skills:['eCleave','eFormation'],                   isPlayer:false, aiType:'tactical'   },
-    inquisitor:      { name:'Inquisitor',       color:'#884466', maxHp:85,  atk:10, def:8,  mag:20, spd:10, luck:3, move:3, skills:['eShardBlast','eCorruptBersk','eShieldFaith'], isPlayer:false, aiType:'support' },
-    eliteGuard:      { name:'Elite Guard',      color:'#aaaacc', maxHp:140, atk:25, def:20, mag:5,  spd:9,  luck:2, move:3, skills:['ePrecise','eCounter'],                    isPlayer:false, aiType:'aggressive' },
-    corruptedKnight: { name:'Corrupt Knight',   color:'#442244', maxHp:150, atk:28, def:20, mag:10, spd:7,  luck:2, move:2, skills:['eDarkBlade','eDevour'],                   isPlayer:false, aiType:'aggressive', physResist:0.2 },
-    throneGuard:     { name:'Throne Guard',     color:'#886633', maxHp:100, atk:22, def:17, mag:6,  spd:9,  luck:3, move:3, skills:['eLoyalty','eShieldStrike'],               isPlayer:false, aiType:'support'    },
-    voidKnight:      { name:'Void Knight',      color:'#334455', maxHp:120, atk:22, def:14, mag:12, spd:10, luck:3, move:3, skills:['eVoidSlash','eCorruptBersk'],             isPlayer:false, aiType:'aggressive' },
-    voidWraith:      { name:'Void Wraith',      color:'#113355', maxHp:80,  atk:12, def:5,  mag:25, spd:18, luck:4, move:6, skills:['eRealityTear','ePhase'],                  isPlayer:false, aiType:'tactical', ignoresTerrain:true },
-    shardGuardian:   { name:'Shard Guardian',   color:'#8877aa', maxHp:100, atk:20, def:16, mag:12, spd:10, luck:3, move:3, skills:['eShardSlash','eSBarrier'],               isPlayer:false, aiType:'aggressive' },
-    voidShard:       { name:'Void Shard',       color:'#225577', maxHp:60,  atk:15, def:8,  mag:15, spd:8,  luck:1, move:2, skills:['eShardBlast'],                           isPlayer:false, aiType:'aggressive' },
-    taxGuard:        { name:'Tax Guard',        color:'#887744', maxHp:70,  atk:15, def:10, mag:2,  spd:8,  luck:2, move:3, skills:['eStrike'],                               isPlayer:false, aiType:'aggressive' },
-    corruptCollect:  { name:'Tax Collector',    color:'#996622', maxHp:100, atk:18, def:12, mag:5,  spd:9,  luck:3, move:3, skills:['eHeavyBlow','eCommand'],                  isPlayer:false, aiType:'tactical'   },
+    bandit:          { name:'Bandit',           color:'#996633', maxHp:50,  atk:14, def:6,  mag:2,  spd:7,  luck:2, move:3, skills:['eStrike'],                               isPlayer:false, aiType:'aggressive', guardType:'sword', weak:['dagger','fire'],                    guardMax:2, drops:[{item:'hp_potion',chance:0.25,count:1}] },
+    banditCaptain:   { name:'Bandit Captain',   color:'#cc4422', maxHp:90,  atk:18, def:10, mag:3,  spd:8,  luck:3, move:3, skills:['eStrike','eHeavyBlow'],                   isPlayer:false, aiType:'aggressive', guardType:'axe',   weak:['dagger','fire'],   resist:['sword'], guardMax:3, drops:[{item:'hp_potion',chance:0.5,count:1},{item:'mp_potion',chance:0.3,count:1}] },
+    corruptSpirit:   { name:'Corrupt Spirit',   color:'#44aaaa', maxHp:60,  atk:8,  def:4,  mag:18, spd:12, luck:4, move:4, skills:['eWail','eCurse'],                         isPlayer:false, aiType:'tactical',                     weak:['light','fire'],   resist:['dark','dagger'], guardMax:2 },
+    wraith:          { name:'Wraith',           color:'#225588', maxHp:45,  atk:5,  def:2,  mag:22, spd:15, luck:3, move:5, skills:['eRealityTear','ePhase'],                  isPlayer:false, aiType:'tactical', ignoresTerrain:true, weak:['light'],           resist:['dark','ice'], guardMax:2, drops:[{item:'mp_potion',chance:0.4,count:1},{item:'phoenix_ash',chance:0.15,count:1}] },
+    enforcer:        { name:'Enforcer',         color:'#778877', maxHp:80,  atk:16, def:12, mag:4,  spd:8,  luck:3, move:3, skills:['eStrike','eSuppress'],                    isPlayer:false, aiType:'aggressive', guardType:'sword', weak:['lance','lightning'], guardMax:3, drops:[{item:'hp_potion',chance:0.25,count:1},{item:'mp_potion',chance:0.2,count:1}] },
+    enforcerCaptain: { name:'Enf.Captain',      color:'#557755', maxHp:120, atk:20, def:14, mag:5,  spd:9,  luck:3, move:3, skills:['eStrike','eHeavyBlow','ePlagueTch'],      isPlayer:false, aiType:'tactical',   guardType:'axe',   weak:['staff','lightning'], resist:['sword'], guardMax:3 },
+    thief:           { name:'Thief',            color:'#886644', maxHp:65,  atk:17, def:7,  mag:4,  spd:13, luck:6, move:4, skills:['eBackstab','ePilfer'],                    isPlayer:false, aiType:'aggressive', guardType:'dagger', weak:['sword','fire'],  resist:['dagger'], guardMax:2, drops:[{item:'hp_potion',chance:0.3,count:1}] },
+    thiefBoss:       { name:'Thief Boss',       color:'#aa7733', maxHp:110, atk:22, def:10, mag:6,  spd:14, luck:7, move:5, skills:['eBackstab','eSmokeScr'],                  isPlayer:false, aiType:'tactical',   guardType:'dagger', weak:['sword','light'], resist:['dagger'], guardMax:3 },
+    assassin:        { name:'Assassin',         color:'#222255', maxHp:70,  atk:20, def:8,  mag:5,  spd:16, luck:8, move:5, skills:['eShadowStrike','eVanish'],                isPlayer:false, aiType:'aggressive', guardType:'dagger', weak:['sword','light'], resist:['dark'], guardMax:2 },
+    shadowMaster:    { name:'Shadow Master',    color:'#334466', maxHp:140, atk:18, def:12, mag:14, spd:12, luck:5, move:4, skills:['eDarkBlade','eNightmare','eCommand'],      isPlayer:false, aiType:'tactical',                     weak:['light'],          resist:['dark','dagger'], guardMax:4 },
+    castleGuard:     { name:'Castle Guard',     color:'#9999bb', maxHp:90,  atk:17, def:15, mag:3,  spd:8,  luck:2, move:3, skills:['eShieldStrike','eFormation'],             isPlayer:false, aiType:'aggressive', guardType:'lance', weak:['staff','lightning'], resist:['sword','axe'], guardMax:3, drops:[{item:'hp_potion',chance:0.35,count:1},{item:'elixir',chance:0.1,count:1}] },
+    castleGuardCap:  { name:'Guard Captain',    color:'#7777aa', maxHp:130, atk:22, def:18, mag:5,  spd:9,  luck:3, move:3, skills:['eCleave','eFormation'],                   isPlayer:false, aiType:'tactical',   guardType:'lance', weak:['staff','lightning'], resist:['sword','axe'], guardMax:4 },
+    inquisitor:      { name:'Inquisitor',       color:'#884466', maxHp:85,  atk:10, def:8,  mag:20, spd:10, luck:3, move:3, skills:['eShardBlast','eCorruptBersk','eShieldFaith'], isPlayer:false, aiType:'support',                  weak:['light','dagger'], resist:['fire'], guardMax:3 },
+    eliteGuard:      { name:'Elite Guard',      color:'#aaaacc', maxHp:140, atk:25, def:20, mag:5,  spd:9,  luck:2, move:3, skills:['ePrecise','eCounter'],                    isPlayer:false, aiType:'aggressive', guardType:'lance', weak:['staff','ice'],       resist:['sword','axe'], guardMax:4 },
+    corruptedKnight: { name:'Corrupt Knight',   color:'#442244', maxHp:150, atk:28, def:20, mag:10, spd:7,  luck:2, move:2, skills:['eDarkBlade','eDevour'],                   isPlayer:false, aiType:'aggressive', physResist:0.2,      weak:['light'],          resist:['dark','sword','dagger'], guardMax:4, drops:[{item:'elixir',chance:0.4,count:1},{item:'phoenix_ash',chance:0.25,count:1}] },
+    throneGuard:     { name:'Throne Guard',     color:'#886633', maxHp:100, atk:22, def:17, mag:6,  spd:9,  luck:3, move:3, skills:['eLoyalty','eShieldStrike'],               isPlayer:false, aiType:'support',    guardType:'lance', weak:['staff','fire'],      resist:['sword'], guardMax:3 },
+    voidKnight:      { name:'Void Knight',      color:'#334455', maxHp:120, atk:22, def:14, mag:12, spd:10, luck:3, move:3, skills:['eVoidSlash','eCorruptBersk'],             isPlayer:false, aiType:'aggressive', guardType:'sword', weak:['light'],             resist:['dark'], guardMax:4 },
+    voidWraith:      { name:'Void Wraith',      color:'#113355', maxHp:80,  atk:12, def:5,  mag:25, spd:18, luck:4, move:6, skills:['eRealityTear','ePhase'],                  isPlayer:false, aiType:'tactical', ignoresTerrain:true, weak:['light'],           resist:['dark','ice'], guardMax:3, drops:[{item:'elixir',chance:0.25,count:1},{item:'phoenix_ash',chance:0.2,count:1}] },
+    shardGuardian:   { name:'Shard Guardian',   color:'#8877aa', maxHp:100, atk:20, def:16, mag:12, spd:10, luck:3, move:3, skills:['eShardSlash','eSBarrier'],               isPlayer:false, aiType:'aggressive', guardType:'lance', weak:['lightning'],         resist:['dark'], guardMax:4 },
+    voidShard:       { name:'Void Shard',       color:'#225577', maxHp:60,  atk:15, def:8,  mag:15, spd:8,  luck:1, move:2, skills:['eShardBlast'],                           isPlayer:false, aiType:'aggressive',                   weak:['light','lightning'], resist:['dark'], guardMax:2 },
+    taxGuard:        { name:'Tax Guard',        color:'#887744', maxHp:70,  atk:15, def:10, mag:2,  spd:8,  luck:2, move:3, skills:['eStrike'],                               isPlayer:false, aiType:'aggressive', guardType:'sword', weak:['dagger','fire'],     guardMax:2 },
+    corruptCollect:  { name:'Tax Collector',    color:'#996622', maxHp:100, atk:18, def:12, mag:5,  spd:9,  luck:3, move:3, skills:['eHeavyBlow','eCommand'],                  isPlayer:false, aiType:'tactical',   guardType:'axe',   weak:['staff','fire'],      resist:['sword'], guardMax:3 },
 
     // ── Lord Aldric (Phase 1 battle — ends at 1 HP) ─────────────
     lordAldricP1: {
       name:'Lord Aldric', color:'#8833aa', maxHp:200, atk:25, def:18, mag:20, spd:11, luck:5, move:3,
       skills:['eDarkBlade','eCorruption','eCommand','eTactRet'],
+      weak:['light','lance'], resist:['dark'], guardMax:5,
       isPlayer:false, aiType:'boss', isBoss:true,
       bossEndsAt1HP: true,   // battle ends when reduced to 1 HP (he isn't killed)
     },
@@ -524,6 +620,7 @@ const DATA = (() => {
     varethFragment: {
       name:'VARETH', color:'#cc44ff', maxHp:400, atk:30, def:15, mag:35, spd:12, luck:0, move:4,
       skills:['eRealityCrack','eShardDrain','eCorruptBersk','eVoidMaw'],
+      weak:['light'], resist:['dark','fire','ice'], guardMax:6,
       isPlayer:false, aiType:'boss', isBoss:true,
       actionsPerTurn:2,
       reviveAddsAt50: true,  // revive void shards when at 50% HP (once)
@@ -551,6 +648,7 @@ const DATA = (() => {
     battle1: {
       id:'battle1', label:'Battle I - First Blood', background:'village',
       expReward: 25,
+      drops:[{item:'hp_potion',chance:0.7,count:1}],
       partyOverride:['kael'],  // only Kael
       enemies:[
         { key:'bandit',        col:9, row:2 },
@@ -559,6 +657,11 @@ const DATA = (() => {
       terrain:[
         {col:5,row:2,type:'elevated'},{col:6,row:2,type:'elevated'},
         {col:5,row:3,type:'elevated'},{col:6,row:3,type:'elevated'},
+        // Village well and garden on party side
+        {col:1,row:1,type:'forest'},{col:2,row:5,type:'forest'},
+        {col:3,row:3,type:'forest'},
+        // Muddy puddle between groups
+        {col:7,row:1,type:'water'},{col:8,row:4,type:'water'},
       ],
       preBattleDialogue:[
         { name:'Bandit Captain', color:'#cc4422', portrait:'none',
@@ -571,7 +674,9 @@ const DATA = (() => {
     battle2: {
       id:'battle2', label:'Battle II — Mirewood Haunting', background:'forest',
       expReward: 35,
+      drops:[{item:'hp_potion',chance:0.6,count:1},{item:'mp_potion',chance:0.4,count:1}],
       partyOverride:null,
+      weather:'fog',  // foggy forest
       enemies:[
         { key:'corruptSpirit', col:8, row:0 },
         { key:'corruptSpirit', col:9, row:2 },
@@ -583,6 +688,12 @@ const DATA = (() => {
         {col:3,row:3,type:'forest'},{col:4,row:3,type:'forest'},
         {col:5,row:2,type:'forest'},{col:2,row:2,type:'forest'},
         {col:8,row:0,type:'forest'},{col:9,row:1,type:'forest'},
+        // Forest stream cutting through the clearing
+        {col:6,row:0,type:'water'},{col:6,row:2,type:'water'},{col:6,row:4,type:'water'},
+        // Raised ground on party flank
+        {col:1,row:2,type:'elevated'},{col:1,row:4,type:'elevated'},
+        // Dense trees on enemy side
+        {col:10,row:1,type:'forest'},{col:11,row:4,type:'forest'},
       ],
       preBattleDialogue:[
         { name:'Lyra', color:'#bb55ff', portrait:'lyra',
@@ -599,6 +710,7 @@ const DATA = (() => {
     battle3: {
       id:'battle3', label:'Battle III — The Plague Enforcers', background:'town',
       expReward: 45,
+      drops:[{item:'hp_potion',chance:0.8,count:2},{item:'antidote',chance:0.5,count:1}],
       partyOverride:null,
       enemies:[
         { key:'enforcer',        col:9, row:1 },
@@ -607,7 +719,12 @@ const DATA = (() => {
       ],
       terrain:[
         {col:4,row:3,type:'water'},{col:5,row:3,type:'water'},
-        {col:4,row:4,type:'water'},
+        {col:4,row:4,type:'water'},{col:6,row:3,type:'water'},
+        // Market stall platforms on flanks
+        {col:2,row:0,type:'elevated'},{col:2,row:5,type:'elevated'},
+        {col:3,row:2,type:'elevated'},
+        // Collapsed market sections mid-field
+        {col:7,row:1,type:'ruins'},{col:7,row:4,type:'ruins'},
       ],
       theron_reinforcement: true,  // Theron spawns at col:0,row:3 on turn 3
       preBattleDialogue:[
@@ -621,6 +738,7 @@ const DATA = (() => {
     battle4: {
       id:'battle4', label:'Battle IV — The Guildhouse Job', background:'selvara',
       expReward: 55,
+      drops:[{item:'mp_potion',chance:0.6,count:1},{item:'hp_potion',chance:0.5,count:1}],
       partyOverride:null,
       enemies:[
         { key:'thief',     col:8, row:0 },
@@ -631,6 +749,11 @@ const DATA = (() => {
       terrain:[
         {col:5,row:1,type:'ruins'},{col:6,row:1,type:'ruins'},
         {col:5,row:3,type:'ruins'},{col:6,row:4,type:'ruins'},
+        // Merchant platforms (elevated crates/stages)
+        {col:2,row:1,type:'elevated'},{col:3,row:4,type:'elevated'},
+        // More scattered rubble mid-field
+        {col:7,row:0,type:'ruins'},{col:8,row:3,type:'ruins'},
+        {col:4,row:5,type:'ruins'},
       ],
       preBattleDialogue:[
         { name:'Thief Boss', color:'#aa7733', portrait:'none',
@@ -643,6 +766,7 @@ const DATA = (() => {
     battle5: {
       id:'battle5', label:'Battle V — Night Ambush in Selvara', background:'selvara_night',
       expReward: 55,
+      drops:[{item:'elixir',chance:0.4,count:1},{item:'hp_potion',chance:0.7,count:1}],
       partyOverride:null,
       nightBonus: true,  // enemies get +10% evasion
       enemies:[
@@ -654,6 +778,12 @@ const DATA = (() => {
       terrain:[
         {col:3,row:1,type:'forest'},{col:4,row:4,type:'forest'},
         {col:7,row:2,type:'forest'},
+        // Crate stacks and rooftop edges used for ambush cover
+        {col:1,row:3,type:'elevated'},{col:5,row:0,type:'elevated'},
+        {col:5,row:5,type:'elevated'},
+        // Debris from earlier fighting
+        {col:8,row:1,type:'ruins'},{col:8,row:4,type:'ruins'},
+        {col:6,row:3,type:'ruins'},
       ],
       preBattleDialogue:[
         { name:'Shadow Master', color:'#334466', portrait:'none',
@@ -666,6 +796,7 @@ const DATA = (() => {
     battle5opt: {
       id:'battle5opt', label:'Optional — The Corrupt Tax Collector', background:'selvara',
       expReward: 30,
+      drops:[{item:'hp_potion',chance:0.8,count:1},{item:'antidote',chance:0.6,count:1}],
       optional: true,
       partyOverride:null,
       enemies:[
@@ -673,7 +804,12 @@ const DATA = (() => {
         { key:'taxGuard',      col:9, row:4 },
         { key:'corruptCollect',col:10,row:2 },
       ],
-      terrain:[],
+      terrain:[
+        // Tax collector's checkpoint — barriers and platforms
+        {col:4,row:0,type:'elevated'},{col:4,row:5,type:'elevated'},
+        {col:6,row:2,type:'ruins'},{col:6,row:4,type:'ruins'},
+        {col:3,row:3,type:'ruins'},
+      ],
       preBattleDialogue:[
         { name:'Tax Collector', color:'#996622', portrait:'none',
           text:"New tariff. You breathe in Selvara, you pay. And if you don't pay... well. These guards get bored." },
@@ -685,6 +821,7 @@ const DATA = (() => {
     battle6: {
       id:'battle6', label:'Battle VI — Undercity Patrol', background:'undercity',
       expReward: 65,
+      drops:[{item:'hp_potion',chance:0.8,count:2},{item:'mp_potion',chance:0.5,count:1}],
       partyOverride:null,
       enemies:[
         { key:'castleGuard',    col:8, row:0 },
@@ -696,6 +833,12 @@ const DATA = (() => {
         {col:4,row:2,type:'ruins'},{col:5,row:2,type:'ruins'},
         {col:4,row:4,type:'ruins'},
         {col:7,row:1,type:'ruins'},{col:8,row:5,type:'ruins'},
+        // Sewer channels cutting across the undercity floor
+        {col:2,row:1,type:'water'},{col:3,row:1,type:'water'},
+        {col:2,row:4,type:'water'},{col:3,row:4,type:'water'},
+        // Raised walkways over the sewers
+        {col:1,row:0,type:'elevated'},{col:1,row:5,type:'elevated'},
+        {col:6,row:3,type:'ruins'},
       ],
       preBattleDialogue:[
         { name:'Inquisitor', color:'#884466', portrait:'none',
@@ -721,6 +864,12 @@ const DATA = (() => {
         {col:0,row:0,type:'elevated'},{col:0,row:5,type:'elevated'},
         {col:10,row:0,type:'elevated'},{col:10,row:5,type:'elevated'},
         {col:5,row:0,type:'elevated'},{col:5,row:5,type:'elevated'},
+        // Fallen columns creating ruins mid-hall
+        {col:3,row:2,type:'ruins'},{col:3,row:4,type:'ruins'},
+        {col:7,row:1,type:'ruins'},{col:7,row:4,type:'ruins'},
+        // Flanking elevated positions along walls
+        {col:0,row:2,type:'elevated'},{col:0,row:3,type:'elevated'},
+        {col:11,row:2,type:'elevated'},{col:11,row:4,type:'elevated'},
       ],
       preBattleDialogue:[
         { name:'Elite Guard', color:'#aaaacc', portrait:'none',
@@ -743,6 +892,13 @@ const DATA = (() => {
       terrain:[
         {col:10,row:2,type:'elevated'},  // throne — Aldric gets ATK bonus here
         {col:5,row:0,type:'elevated'},{col:5,row:5,type:'elevated'},
+        // Throne dais steps
+        {col:9,row:1,type:'elevated'},{col:9,row:3,type:'elevated'},
+        // Overturned furniture / battle damage as fight progresses
+        {col:3,row:1,type:'ruins'},{col:3,row:4,type:'ruins'},
+        {col:6,row:2,type:'ruins'},{col:7,row:4,type:'ruins'},
+        // Side alcoves on the throne room walls
+        {col:0,row:1,type:'elevated'},{col:0,row:4,type:'elevated'},
       ],
       bossEndsAtOneHP:'lordAldricP1',
       preBattleDialogue:[
@@ -770,6 +926,12 @@ const DATA = (() => {
       terrain:[
         {col:5,row:2,type:'ruins'},{col:6,row:3,type:'ruins'},
         {col:3,row:1,type:'ruins'},{col:8,row:4,type:'ruins'},
+        // Cracked vault floor flooding with void-energy water
+        {col:4,row:0,type:'water'},{col:5,row:1,type:'water'},
+        {col:4,row:5,type:'water'},{col:5,row:4,type:'water'},
+        // More crumbling vault sections
+        {col:2,row:3,type:'ruins'},{col:7,row:2,type:'ruins'},
+        {col:6,row:5,type:'ruins'},
       ],
       dynamicTerrain: true,  // some tiles flicker each turn
       preBattleDialogue:[
@@ -794,6 +956,12 @@ const DATA = (() => {
       terrain:[
         {col:6,row:1,type:'elevated'},{col:6,row:3,type:'elevated'},
         {col:8,row:2,type:'ruins'},
+        // Observatory star-chart pedestals and stone platforms
+        {col:3,row:0,type:'elevated'},{col:3,row:5,type:'elevated'},
+        {col:5,row:2,type:'elevated'},{col:5,row:4,type:'elevated'},
+        // Ancient inscribed ruins on the observatory floor
+        {col:4,row:3,type:'ruins'},{col:7,row:0,type:'ruins'},
+        {col:7,row:5,type:'ruins'},{col:2,row:2,type:'ruins'},
       ],
       preBattleDialogue:[
         { name:'Shard Guardian', color:'#8877aa', portrait:'none',
@@ -807,6 +975,7 @@ const DATA = (() => {
       id:'battle10b', label:'Battle X — Vareth Manifests', background:'vault_final',
       expReward: 150,
       partyOverride:null,
+      weather:'storm',  // chaotic energy storm
       enemies:[
         { key:'varethFragment', col:9,  row:2 },
         { key:'voidShard',      col:10, row:0 },
@@ -818,6 +987,10 @@ const DATA = (() => {
         {col:4,row:3,type:'ruins'},{col:3,row:4,type:'ruins'},{col:5,row:5,type:'ruins'},
         {col:7,row:0,type:'ruins'},{col:8,row:2,type:'ruins'},{col:7,row:4,type:'ruins'},
         {col:9,row:1,type:'ruins'},{col:10,row:3,type:'ruins'},
+        // Void pools — where the seal has completely dissolved
+        {col:5,row:1,type:'water'},{col:6,row:2,type:'water'},
+        {col:5,row:3,type:'water'},{col:6,row:4,type:'water'},
+        {col:1,row:3,type:'water'},{col:2,row:0,type:'water'},
       ],
       preBattleDialogue:[
         { name:'Malachar', color:'#8844cc', portrait:'malachar',
@@ -849,21 +1022,21 @@ const DATA = (() => {
 
     // ── ACT 1 ────────────────────────────────────────────────────
     act1Pre: [
-      { name:'Elder Brennan', color:'#ffddaa', portrait:'none',
+      { name:'Elder Brennan', color:'#ffddaa', portrait:'elder',
         text:"Kael! The bandits — they're everywhere. They wore a sigil — a broken crown. They came looking for something." },
       { name:'Kael', color:'#4488ff', portrait:'kael',
         text:"Get inside. I'll deal with them." },
     ],
     act1Post: [
-      { name:'Elder Brennan', color:'#ffddaa', portrait:'none',
+      { name:'Elder Brennan', color:'#ffddaa', portrait:'elder',
         text:"Kael... come close. I don't have... much time." },
       { name:'Kael', color:'#4488ff', portrait:'kael',
         text:"You're going to be fine. We stopped them." },
-      { name:'Elder Brennan', color:'#ffddaa', portrait:'none',
+      { name:'Elder Brennan', color:'#ffddaa', portrait:'elder',
         text:"Your father... he didn't die in any war. He left this with me. He said when the fires came... to give it to you." },
       { name:'Kael', color:'#4488ff', portrait:'kael',
         text:"...What is this? It feels warm. What am I holding?" },
-      { name:'Elder Brennan', color:'#ffddaa', portrait:'none',
+      { name:'Elder Brennan', color:'#ffddaa', portrait:'elder',
         text:"Your father called it a piece of the Starlight Crown. He said... only his blood could feel it. He said... you'd know what to do. Find out the truth, Kael. He didn't die a simple farmer. He was—" },
       { name:'Kael', color:'#4488ff', portrait:'kael',
         text:"Don't speak. Rest." },
@@ -911,13 +1084,13 @@ const DATA = (() => {
 
     // Shrine vision
     act2Shrine: [
-      { name:'ECHO — Kael\'s Father', color:'#aaccff', portrait:'none',
+      { name:'ECHO — Kael\'s Father', color:'#aaccff', portrait:'echo_father',
         text:"\"I don't like this, Malachar. Guarding a piece of the seal in a farming village.\"" },
-      { name:'ECHO — Malachar', color:'#8844cc', portrait:'none',
+      { name:'ECHO — Malachar', color:'#8844cc', portrait:'echo_malachar',
         text:"\"It is the safest place. No one looks for a prison bar in a haystack. Your son will never need to know.\"" },
-      { name:'ECHO — Kael\'s Father', color:'#aaccff', portrait:'none',
+      { name:'ECHO — Kael\'s Father', color:'#aaccff', portrait:'echo_father',
         text:"\"And if they come for it? If the fires come?\"" },
-      { name:'ECHO — Malachar', color:'#8844cc', portrait:'none',
+      { name:'ECHO — Malachar', color:'#8844cc', portrait:'echo_malachar',
         text:"\"Then he will be ready. The blood knows. It always knows.\"" },
       { name:'Kael', color:'#4488ff', portrait:'kael',
         text:"My father was... guarding it. He wasn't just a farmer who happened to have a shard. He was chosen." },
@@ -1079,13 +1252,13 @@ const DATA = (() => {
 
     // ── ACT 6 EXTENDED — Undercity People ────────────────────────
     act6UndercityMeet: [
-      { name:'Undercity Elder', color:'#667788', portrait:'none',
+      { name:'Undercity Elder', color:'#667788', portrait:'undercity_elder',
         text:"Lyra said you were coming. She vouched for all of you — which is the only reason you're still standing." },
-      { name:'Undercity Elder', color:'#667788', portrait:'none',
-        text:"Down here we have four hundred people. Families. People who had nowhere else to go when Aldric's reforms took their land, their businesses, their futures." },
+      { name:'Undercity Elder', color:'#667788', portrait:'undercity_elder',
+        text:"Down here we have four hundred people. Families. People who had nowhere else to go when Aldric's purges took their land, their businesses, their futures." },
       { name:'Kael', color:'#4488ff', portrait:'kael',
         text:"I want to help change that." },
-      { name:'Undercity Elder', color:'#667788', portrait:'none',
+      { name:'Undercity Elder', color:'#667788', portrait:'undercity_elder',
         text:"Then listen first. Help second. The people down here have been listening to people 'wanting to help' for twenty years." },
     ],
     act6PostDocuments: [
@@ -1109,17 +1282,17 @@ const DATA = (() => {
     act7BreakStasis: [
       { name:'Sera', color:'#ffdd44', portrait:'sera',
         text:"(breaking the stasis) Stay back — the field will collapse inward—" },
-      { name:'King Valdris', color:'#ffcc55', portrait:'none',
+      { name:'King Valdris', color:'#ffcc55', portrait:'king',
         text:"(gasping) ...Where... what year is it?" },
       { name:'Kael', color:'#4488ff', portrait:'kael',
         text:"You've been asleep for a long time, Your Majesty. We're going to get you out of here." },
-      { name:'King Valdris', color:'#ffcc55', portrait:'none',
+      { name:'King Valdris', color:'#ffcc55', portrait:'king',
         text:"(looking at Kael, recognition in his eyes) ...You look exactly like your father." },
     ],
     act7Post: [
       { name:'Lyra', color:'#bb55ff', portrait:'lyra',
         text:"The king is with us. Whatever Aldric says in that throne room — the king is alive to contradict it." },
-      { name:'King Valdris', color:'#ffcc55', portrait:'none',
+      { name:'King Valdris', color:'#ffcc55', portrait:'king',
         text:"Aldric. I need to see him." },
       { name:'Kael', color:'#4488ff', portrait:'kael',
         text:"Not yet. First we deal with the shards." },
@@ -1127,17 +1300,17 @@ const DATA = (() => {
 
     // ── ACT 7 EXTENDED — The King Wakes ──────────────────────────
     act7KingExtended: [
-      { name:'King Valdris', color:'#ffcc55', portrait:'none',
+      { name:'King Valdris', color:'#ffcc55', portrait:'king',
         text:"Ten years. That's..." },
-      { name:'King Valdris', color:'#ffcc55', portrait:'none',
+      { name:'King Valdris', color:'#ffcc55', portrait:'king',
         text:"My son would be — my son is dead, isn't he." },
       { name:'Kael', color:'#4488ff', portrait:'kael',
         text:"I don't know. I — I'm his son. Your nephew, actually. My father was your brother." },
-      { name:'King Valdris', color:'#ffcc55', portrait:'none',
+      { name:'King Valdris', color:'#ffcc55', portrait:'king',
         text:"(long silence) ...Aldric told me Brennan died. Years ago." },
       { name:'Kael', color:'#4488ff', portrait:'kael',
         text:"He hid him. Your Majesty — a lot happened. We need to get you somewhere safe. Then we'll explain everything." },
-      { name:'King Valdris', color:'#ffcc55', portrait:'none',
+      { name:'King Valdris', color:'#ffcc55', portrait:'king',
         text:"(touching Kael's face) You have his nose. He always hated it. He said it made him look stubborn." },
       { name:'Kael', color:'#4488ff', portrait:'kael',
         text:"(small, surprised laugh) ...I never knew that." },
@@ -1281,7 +1454,7 @@ const DATA = (() => {
         text:"Hold back what bleeds through while I work. And if the choice comes — choose carefully." },
     ],
     act9TheronChoice: [
-      { name:'Vareth', color:'#cc44ff', portrait:'none',
+      { name:'Vareth', color:'#cc44ff', portrait:'vareth',
         text:"...Theron. Yessss. I know your name. I know your shame. The forest. The spirits you hurt. Let me in. I can give you clarity. Power. Purpose. All you've ever wanted to be, I can MAKE you." },
       { name:'CHOICE', color:'#ffff88', portrait:'none', isChoice:true,
         text:"Theron hesitates. The voice is overwhelming. Accept Vareth's power?",
@@ -1363,7 +1536,7 @@ const DATA = (() => {
         text:"(sitting heavily against the wall, looking ancient) ...Good. I think I forgot, somewhere along the way, that I actually wanted this to end." },
       { name:'Lord Aldric', color:'#8833aa', portrait:'aldric',
         text:"I'll come quietly." },
-      { name:'King Valdris', color:'#ffcc55', portrait:'none',
+      { name:'King Valdris', color:'#ffcc55', portrait:'king',
         text:"(on a stretcher, looking at Aldric) Why?" },
       { name:'Lord Aldric', color:'#8833aa', portrait:'aldric',
         text:"Because you were too good at being king and too bad at everything else. And someone had to be bad at being king so you could be good at the rest." },
@@ -1439,9 +1612,9 @@ const DATA = (() => {
         text:"(handing Kael a letter) He wrote this the day he left you with the elder. He asked me to give it to you if things ended the way they needed to." },
     ],
     act11Letter: [
-      { name:"Kael's Father (letter)", color:'#aaccff', portrait:'none',
+      { name:"Kael's Father (letter)", color:'#aaccff', portrait:'echo_father',
         text:"Son, If you're reading this, the fires came. I hope someone good found you. I was a prince who chose a village. A warrior who chose peace. A man given power who chose to give it away, because I was afraid of what I'd become." },
-      { name:"Kael's Father (letter)", color:'#aaccff', portrait:'none',
+      { name:"Kael's Father (letter)", color:'#aaccff', portrait:'echo_father',
         text:"I don't know if that makes me wise or a coward. Probably both. You carry our blood. Use it better than I did. I love you. Find something worth protecting and protect it. — Your father." },
       { name:'Kael', color:'#4488ff', portrait:'kael',
         text:"(folds the letter. Looks out over Valdris.)" },
@@ -1688,15 +1861,6 @@ const DATA = (() => {
   // Each level grants a skill unlock if defined in LEVEL_SKILL_UNLOCKS.
   function expForLevel(lvl) { return lvl * 100; }
 
-  return {
-    WORLD_MAP, TILE_COLORS, TILE_WALKABLE,
-    LOCATIONS, NPCS, CHESTS,
-    EQUIPMENT, SKILLS,
-    CHAR_TEMPLATES, ENEMY_TEMPLATES,
-    BATTLES, STORY, BATTLE_EXP, LEVEL_SKILL_UNLOCKS,
-    makeChar, applyEquipment, expForLevel,
-  };
-
   // ── Party Banter System ───────────────────────────────────────
   // Mid-battle dialogue triggered by various events
   const BANTER = {
@@ -1754,17 +1918,28 @@ const DATA = (() => {
     ],
   };
 
-  // Helper to get random banter for a trigger
-  function getBanter(triggerType) {
-    const pool = BANTER[triggerType];
+  // Helper to get random banter for a trigger. If `present` (array of speaker
+  // names) is given, only quotes from characters actually in the battle are
+  // eligible — so a Kael-only fight never has Lyra pipe up.
+  function getBanter(triggerType, present) {
+    let pool = BANTER[triggerType];
     if (!pool || pool.length === 0) return null;
+    if (present && present.length) {
+      const set = new Set(present);
+      const filtered = pool.filter(q => set.has(q.speaker));
+      if (filtered.length === 0) return null;   // nobody present has a line
+      pool = filtered;
+    }
     return pool[Math.floor(Math.random() * pool.length)];
   }
 
   return {
-    WORLD_MAP, TILE_COLORS, TILE_WALKABLE, NPCS, CHESTS,
+    WORLD_MAP, TILE_COLORS, TILE_WALKABLE, LOCATIONS, NPCS, CHESTS,
     EQUIPMENT, SKILLS, CHAR_TEMPLATES, ENEMY_TEMPLATES,
-    BATTLES, DIALOGUE, LEVEL_SKILL_UNLOCKS, BANTER,
+    BATTLES, STORY, LEVEL_SKILL_UNLOCKS, BANTER,
+    CONSUMABLES, rollDrops,
     expForLevel, makeChar, applyEquipment, getBanter,
+    counterMult, weaknessTokens, WEAPON_BEATS, ELEMENTS,
+    backAttackMult, isFlanked, adjacentAllies,
   };
 })();

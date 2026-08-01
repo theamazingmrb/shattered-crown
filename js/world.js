@@ -84,7 +84,7 @@ const WORLD = (() => {
     if (UI.isFading()) return;
 
     // Update tile hover info
-    updateTileHoverInfo(game);
+    updateTileHoverInfo(dt, game);
 
     moveCooldown -= dt;
 
@@ -188,6 +188,7 @@ const WORLD = (() => {
 
   function draw(actProgress) {
     const act = actProgress || 0;
+    draw._lastAct = act;
 
     ctx.save();
     ctx.translate(-Math.floor(camX), -Math.floor(camY));
@@ -233,6 +234,9 @@ const WORLD = (() => {
     drawPlayer();
 
     ctx.restore();
+
+    // ── Cinematic vignette + soft player light (screen-space) ──
+    drawWorldGrade();
 
     // Location name overlay
     if (locNameTimer > 0 && locNameAlpha > 0) {
@@ -294,6 +298,32 @@ const WORLD = (() => {
     }
   }
 
+  // Per-region cinematic grade for the overworld (screen-space).
+  const WORLD_GRADE = {
+    0: { tint:'rgba(255,225,160,0.06)', vig:0.34 }, // early (warm)
+    5: { tint:'rgba(120,130,190,0.10)', vig:0.44 }, // mid (cooler)
+    8: { tint:'rgba(150,110,190,0.12)', vig:0.50 }, // late (violet)
+  };
+  function drawWorldGrade() {
+    const act = draw._lastAct || 0;
+    const key = act >= 8 ? 8 : act >= 5 ? 5 : 0;
+    const g = WORLD_GRADE[key];
+    // Soft light around the player (kept subtle so terrain stays readable)
+    const psx = Math.floor(player.px + TILE/2 - camX);
+    const psy = Math.floor(player.py + TILE/2 - camY);
+    const light = ctx.createRadialGradient(psx, psy, 40, psx, psy, 360);
+    light.addColorStop(0, 'rgba(255,244,210,0.10)');
+    light.addColorStop(1, 'rgba(255,244,210,0)');
+    ctx.fillStyle = light; ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+    // Region tint
+    ctx.fillStyle = g.tint; ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+    // Vignette
+    const vg = ctx.createRadialGradient(VIEW_W/2, VIEW_H/2, VIEW_H*0.32, VIEW_W/2, VIEW_H/2, VIEW_H*0.8);
+    vg.addColorStop(0, 'rgba(0,0,0,0)');
+    vg.addColorStop(1, `rgba(0,0,0,${g.vig})`);
+    ctx.fillStyle = vg; ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+  }
+
   function drawTile(tx, ty) {
     const x = tx * TILE, y = ty * TILE;
     const tile = getTile(tx, ty);
@@ -301,6 +331,8 @@ const WORLD = (() => {
 
     ctx.fillStyle = color;
     ctx.fillRect(x, y, TILE, TILE);
+    // Sprite texture base (Kenney Tiny Dungeon — CC0); procedural overlay draws on top
+    if (typeof SPRITES !== 'undefined') SPRITES.terrain(ctx, tile, x, y, TILE);
 
     const t = worldTime * 0.001;
     // Deterministic pseudo-random per tile for consistent variation
@@ -736,31 +768,28 @@ const WORLD = (() => {
     ctx.beginPath(); ctx.ellipse(x, y + 13 - bob * 0.3, 9, 3.8, 0, 0, Math.PI * 2);
     ctx.fillStyle = `rgba(0,0,0,${0.28 - bob * 0.01})`; ctx.fill();
 
-    // Cloak / robe lower
-    ctx.beginPath();
-    ctx.moveTo(x - 8, y + 11 - bob);
-    ctx.lineTo(x + 8, y + 11 - bob);
-    ctx.lineTo(x + 6, y - 2 - bob);
-    ctx.lineTo(x - 6, y - 2 - bob);
-    ctx.closePath();
-    const robeColor = npc.color || '#888888';
-    ctx.fillStyle = robeColor; ctx.fill();
-    ctx.strokeStyle = 'rgba(255,255,255,0.25)'; ctx.lineWidth = 0.8; ctx.stroke();
-
-    // Body / head
-    ctx.beginPath(); ctx.arc(x, y - 3 - bob, 10 * pulse, 0, Math.PI * 2);
-    ctx.fillStyle   = robeColor; ctx.fill();
-    ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1.5; ctx.stroke();
-
-    // Face circle (skin)
-    ctx.beginPath(); ctx.arc(x, y - 4 - bob, 6, 0, Math.PI * 2);
-    ctx.fillStyle = '#f0c888'; ctx.fill();
-
-    // Name initial
-    ctx.fillStyle = '#222222';
-    ctx.font      = 'bold 8px Arial';
+    // Character sprite (Kenney tileset); fallback to colored blob
+    if (typeof SPRITES === 'undefined' || !SPRITES.npc(ctx, npc, npc.tx * TILE, npc.ty * TILE - Math.round(bob), TILE)) {
+      const robeColor = npc.color || '#888888';
+      ctx.beginPath();
+      ctx.moveTo(x - 8, y + 11 - bob);
+      ctx.lineTo(x + 8, y + 11 - bob);
+      ctx.lineTo(x + 6, y - 2 - bob);
+      ctx.lineTo(x - 6, y - 2 - bob);
+      ctx.closePath();
+      ctx.fillStyle = robeColor; ctx.fill();
+      ctx.strokeStyle = 'rgba(255,255,255,0.25)'; ctx.lineWidth = 0.8; ctx.stroke();
+      ctx.beginPath(); ctx.arc(x, y - 3 - bob, 10 * pulse, 0, Math.PI * 2);
+      ctx.fillStyle = robeColor; ctx.fill();
+      ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1.5; ctx.stroke();
+      ctx.beginPath(); ctx.arc(x, y - 4 - bob, 6, 0, Math.PI * 2);
+      ctx.fillStyle = '#f0c888'; ctx.fill();
+      ctx.fillStyle = '#222222';
+      ctx.font = 'bold 8px Arial';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText((npc.name || '?')[0].toUpperCase(), x, y - 4 - bob);
+    }
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText((npc.name || '?')[0].toUpperCase(), x, y - 4 - bob);
 
     // "?" speech bubble
     const qAlpha = 0.55 + 0.45 * Math.sin(t * 1.8 + phase);
@@ -797,21 +826,20 @@ const WORLD = (() => {
     ctx.beginPath(); ctx.arc(cx, cy, ringR, 0, Math.PI*2);
     ctx.strokeStyle = `rgba(255,220,50,${ringAlpha})`; ctx.lineWidth = 2; ctx.stroke();
 
-    // Player body
-    ctx.beginPath(); ctx.arc(cx, cy, 13, 0, Math.PI*2);
-    const pGrad = ctx.createRadialGradient(cx-3, cy-3, 2, cx, cy, 13);
-    pGrad.addColorStop(0, '#6699ff');
-    pGrad.addColorStop(1, '#2255aa');
-    ctx.fillStyle = pGrad; ctx.fill();
-    ctx.strokeStyle = '#88ccff'; ctx.lineWidth = 2; ctx.stroke();
-
-    // Sword cross
-    ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2; ctx.lineCap = 'round';
-    ctx.beginPath(); ctx.moveTo(cx, cy-10); ctx.lineTo(cx, cy+10); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(cx-6, cy-3); ctx.lineTo(cx+6, cy-3); ctx.stroke();
-    // Pommel dot
-    ctx.beginPath(); ctx.arc(cx, cy+10, 2, 0, Math.PI*2);
-    ctx.fillStyle = '#ffdd44'; ctx.fill();
+    // Character sprite (Kenney tile 84 — purple mage); blob as fallback
+    if (typeof SPRITES === 'undefined' || !SPRITES.player(ctx, player.px, player.py, TILE)) {
+      ctx.beginPath(); ctx.arc(cx, cy, 13, 0, Math.PI*2);
+      const pGrad = ctx.createRadialGradient(cx-3, cy-3, 2, cx, cy, 13);
+      pGrad.addColorStop(0, '#6699ff');
+      pGrad.addColorStop(1, '#2255aa');
+      ctx.fillStyle = pGrad; ctx.fill();
+      ctx.strokeStyle = '#88ccff'; ctx.lineWidth = 2; ctx.stroke();
+      ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(cx, cy-10); ctx.lineTo(cx, cy+10); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(cx-6, cy-3); ctx.lineTo(cx+6, cy-3); ctx.stroke();
+      ctx.beginPath(); ctx.arc(cx, cy+10, 2, 0, Math.PI*2);
+      ctx.fillStyle = '#ffdd44'; ctx.fill();
+    }
   }
 
   function getLocationName(tx, ty, actProgress) {
@@ -836,7 +864,7 @@ const WORLD = (() => {
   }
 
   
-  function updateTileHoverInfo(game) {
+  function updateTileHoverInfo(dt, game) {
     if (!game || !game.party) return;
     
     // Get mouse position in world coordinates

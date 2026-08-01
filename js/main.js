@@ -35,6 +35,11 @@ const GAME = (() => {
   let titleTime   = 0;
   let party       = [];
   let inventory   = [];      // array of equipment key strings
+  let partyInventory = {     // consumable key -> count
+    hp_potion: 2,            // Start with some basic potions
+    mp_potion: 1,
+  };
+  let bestiary = {};        // enemy key -> { count, seen: bool }
   let lastBattleDef = null;
   let finalChoiceResult = null;  // 0=Path A Keeper, 1=Path B Swap
   let varethChoiceResult = null; // 0=resist, 1=accept
@@ -89,6 +94,8 @@ const GAME = (() => {
       difficulty,  // Save difficulty mode
       playerPos: WORLD.getPlayerTile(),
       inventory: [...inventory],
+      partyInventory: {...partyInventory},
+      bestiary: {...bestiary},
       party: party.map(ch => ({
         name: ch.name,
         level: ch.level || 1,
@@ -121,6 +128,8 @@ const GAME = (() => {
     kingFreed          = save.kingFreed      || false;
     difficulty         = save.difficulty     || 'normal';  // Restore difficulty
     inventory          = save.inventory      || [];
+    partyInventory     = save.partyInventory  || { hp_potion: 2, mp_potion: 1 };
+    bestiary           = save.bestiary        || {};
 
     // Rebuild party from save
     party = [];
@@ -203,53 +212,10 @@ const GAME = (() => {
     }
   }
 
-  // ── Post-battle EXP & leveling ──────────────────────────────
-  function startBattle(battleKey, cb) {
-    const battleDef = DATA.BATTLES[battleKey];
-    if (!battleDef) { console.error('Battle not found:', battleKey); return; }
-    state = 'BATTLE';
-    BATTLE.startBattle(battleDef, party, (result, survivors, varethPower) => {
-      if (cb) cb(result, survivors, varethPower);
-    }, difficulty);
-  }
+  // NOTE: battle start/end lives in the "Battle start / end" section below
+  // (startBattle / onBattleEnd / onBattleDefeat / retryBattle). An earlier
+  // duplicate set of these was removed — the versions below are the live ones.
 
-  function onBattleEnd(result, survivors, battleKey) {
-    if (result === 'victory') {
-      restorePartyAfterBattle(survivors);
-      const expLines = awardExp(DATA.BATTLES[battleKey]?.expReward || 50);
-      const lines = ['Victory!', ...expLines];
-      UI.showVictory(lines, () => handlePostBattle(battleKey));
-    } else {
-      onBattleDefeat(battleKey);
-    }
-  }
-
-  function onBattleDefeat(battleKey) {
-    state = 'GAMEOVER';
-    AUDIO.stopMusic();
-    AUDIO.sfx.death();
-    retryBattleKey = battleKey;
-  }
-
-  function retryBattle() {
-    state = 'BATTLE';
-    // Reset party HP/MP for retry
-    for (const ch of party) {
-      ch.hp = ch.maxHp;
-      ch.mp = ch.maxMp;
-      ch.dead = false;
-    }
-    const battleDef = DATA.BATTLES[retryBattleKey];
-    BATTLE.startBattle(battleDef, party, (result, survivors) => {
-      if (result === 'victory') {
-        onBattleEnd(result, survivors, retryBattleKey);
-      } else {
-        onBattleDefeat(retryBattleKey);
-      }
-    }, difficulty);
-  }
-
-  let retryBattleKey = null;
   function activateTitleMenuItem(item) {
     if (!item) return;
     AUDIO.sfx.menuOpen();
@@ -258,6 +224,8 @@ const GAME = (() => {
       UI.fadeOut(() => {
         console.log('[NEW GAME] FadeOut complete, initializing game state...');
         inventory          = [];
+        partyInventory     = { hp_potion: 2, mp_potion: 1 };
+        bestiary           = {};
         actProgress        = 0;
         actTriggered       = {};
         finalChoiceResult  = null;
@@ -673,9 +641,33 @@ const GAME = (() => {
     UI.fadeOut(() => {
       state = 'BATTLE';
       AUDIO.crossfadeTo(musicTrack, 800);
-      BATTLE.startBattle(battleDef, party, cb);
+      // Wrap cb to capture battle stats (bestiary + discovered weaknesses).
+      BATTLE.startBattle(battleDef, party, (result, survivors, varAcc, inv, drops, stats) => {
+        persistBattleStats(stats);
+        if (cb) cb(result, survivors, varAcc, inv, drops, stats);
+      });
       UI.fadeIn(300);
     }, 400);
+  }
+
+  // Fold a finished battle's stats into the persistent bestiary, including
+  // weaknesses the party discovered. Safe to call with partial/undefined stats.
+  function persistBattleStats(stats) {
+    if (!stats) return;
+    for (const key of (stats.enemiesSeen || [])) {
+      if (!bestiary[key]) bestiary[key] = { seen: true, count: 0 };
+    }
+    for (const key in (stats.enemiesKilled || {})) {
+      if (!bestiary[key]) bestiary[key] = { seen: true, count: 0 };
+      bestiary[key].count += stats.enemiesKilled[key];
+    }
+    for (const key in (stats.weaknessesFound || {})) {
+      if (!bestiary[key]) bestiary[key] = { seen: true, count: 0 };
+      const known = bestiary[key].weakKnown = bestiary[key].weakKnown || [];
+      for (const t of stats.weaknessesFound[key]) {
+        if (!known.includes(t)) known.push(t);
+      }
+    }
   }
 
   function onBattleEnd(result, survivors, actKey) {
@@ -1028,11 +1020,12 @@ const GAME = (() => {
     document.addEventListener('mousedown', unlockAudio);
 
     UI.setSaveCallback((slot) => saveGame(slot));
+    UI.setBestiaryCallback(() => bestiary);
     UI.startPrologue();
     requestAnimationFrame(loop);
   }
 
-  return { start };
+  return { start, getBestiary: () => bestiary };
 })();
 
 // ── Launch ──────────────────────────────────────────────────

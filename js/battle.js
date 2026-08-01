@@ -21,19 +21,25 @@ const BATTLE = (() => {
   // ── State ────────────────────────────────────────────────────
   let units           = [];
   let currentUnitIdx  = -1;
-  let phase = 'init'; // init|playerMenu|playerMove|playerTarget|enemyTurn|victory|defeat|animating|vChoice
+  let phase = 'init'; // init|playerMenu|playerMove|playerTarget|playerItems|itemTarget|enemyTurn|victory|defeat|animating|vChoice
   let background      = 'village';
   let terrainMap      = {};   // "col,row" -> terrain type
   let dynamicTerrainTick = 0;
   let difficulty      = 'normal';  // Difficulty mode for damage calculations
 
   let selectedSkillKey = null;
+  // Momentum (boost) — how much banked momentum to spend on the next action.
+  const MOMENTUM_MAX = 5;
+  let pendingBoost     = 0;
+  // Latent Power — signature ultimate, charges from damage dealt/taken.
+  const LATENT_MAX = 100;
   let moveHighlight    = [];
   let targetHighlight  = [];
   let pendingMove      = null;
 
   let floatingTexts    = [];
   let onBattleEnd      = null;
+  let presentNames     = [];   // names of party members in the current battle (banter filter)
 
   let pulseT           = 0;
   let aiDelay          = 0;
@@ -54,15 +60,43 @@ const BATTLE = (() => {
   // Visual: screen flash
   let flashAlpha = 0, flashColor = '#ffffff';
   let flashTimer = 0;
+  // Hit-stop: ms the sim stays frozen for impact
+  let hitStopTimer = 0;
 
   // Turn queue preview (next 8)
   let turnQueue = [];
+  let battleInventory = {}; // consumable key -> count
+  let selectedItemKey = null;
+  let battleDrops = []; // items dropped by defeated enemies
+
+  // Battle stats tracking
+  let battleStats = {
+    damageDealt: {},  // char name -> total damage
+    damageTaken: {},  // char name -> total damage taken
+    itemsUsed: 0,
+    turnsTaken: 0,
+    startTime: 0,
+    enemiesDefeated: 0,
+    enemiesSeen: [],     // enemy template keys encountered
+    enemiesKilled: {},   // enemy template key -> count defeated
+    weaknessesFound: {}, // enemy template key -> [discovered tokens]
+  };
+
+  // Battle log - last 20 combat actions
+  let battleLog = [];
+  const MAX_LOG_ENTRIES = 20;
+
+  // Weather conditions
+  let weather = null; // 'rain', 'fog', 'storm', or null
+  let weatherTimer = 0; // For storm lightning timing
+  let currentWeather = null; // For draw function
 
   // ── Setup ────────────────────────────────────────────────────
-  function startBattle(battleDef, partyState, cb, difficultyMode) {
+  function startBattle(battleDef, partyState, cb, difficultyMode, consumables) {
     units           = [];
     floatingTexts   = [];
     selectedSkillKey = null;
+    selectedItemKey = null;
     moveHighlight   = [];
     targetHighlight = [];
     pendingMove     = null;
@@ -79,16 +113,25 @@ const BATTLE = (() => {
     bossEndsAtOneHP   = battleDef.bossEndsAtOneHP || null;
     dynamicTerrainTick = 0;
     flashAlpha = 0;
+    hitStopTimer = 0;
     difficulty = difficultyMode || 'normal';  // Store difficulty for damage calcs
+    battleInventory = consumables ? {...consumables} : {};
+    battleDrops = [];
+    battleStats = {
+      damageDealt: {},
+      damageTaken: {},
+      itemsUsed: 0,
+      turnsTaken: 0,
+      startTime: Date.now(),
+      enemiesDefeated: 0,
+      enemiesSeen: [],
+      enemiesKilled: {},
+      weaknessesFound: {},
+    };
+    battleLog = []; // Reset battle log
+    weather = battleDef.weather || null; // Set weather from battle definition
+    weatherTimer = 0;
 
-    // ── Battle start banter ─────────────────────────────────────
-    // Show a random party quip when battle begins
-    const startBanter = DATA.getBanter('battleStart');
-    if (startBanter) {
-      setTimeout(() => {
-        UI.showBattleQuote(startBanter.speaker, startBanter.text, 2500);
-      }, 600);
-    }
 
     // Build terrain map
     terrainMap = {};
@@ -103,6 +146,18 @@ const BATTLE = (() => {
       ? partyState.filter(p => battleDef.partyOverride.includes(p.name.toLowerCase()))
       : partyState.filter(p => !p.dead);
 
+    // Names of characters actually in this battle — used to filter banter so
+    // absent party members don't chime in (e.g. Lyra in the Kael-only fight).
+    presentNames = partyFilter.map(p => p.name);
+
+    // ── Battle start banter ─────────────────────────────────────
+    const startBanter = DATA.getBanter('battleStart', presentNames);
+    if (startBanter) {
+      setTimeout(() => {
+        UI.showBattleQuote(startBanter.speaker, startBanter.text, 2500);
+      }, 600);
+    }
+
     const partyRows = evenlySpace(partyFilter.length, GRID_ROWS);
     partyFilter.forEach((ch, i) => {
       const u = deepClone(ch);
@@ -111,6 +166,9 @@ const BATTLE = (() => {
       u.ct  = 0;
       u.isPlayer = true;
       u.hasActedThisRound = false;
+      u.momentum = 1;           // Momentum: banked boost resource (start 1, cap MOMENTUM_MAX)
+      u.facing = 'R';           // players start facing right (toward enemies)
+      u.latent = 0;             // Latent Power gauge (0..100); charges within each battle
       units.push(u);
     });
 
@@ -118,6 +176,10 @@ const BATTLE = (() => {
     battleDef.enemies.forEach((eDef, i) => {
       const tmpl = DATA.ENEMY_TEMPLATES[eDef.key];
       if (!tmpl) return;
+      // Track enemy seen
+      if (!battleStats.enemiesSeen.includes(eDef.key)) {
+        battleStats.enemiesSeen.push(eDef.key);
+      }
       const u = deepClone(tmpl);
       u.hp = u.maxHp; u.mp = u.maxMp || 0;
       u.col = eDef.col !== undefined ? eDef.col : 11 - (i % 2);
@@ -131,6 +193,12 @@ const BATTLE = (() => {
       u.hasActedThisRound = false;
       u.aiType = tmpl.aiType || 'aggressive';
       u.reviveTriggered = false;
+      u.templateKey = eDef.key;  // Track for drops
+      // Stagger (Phase 1c): guard depletes on weakness hits; 0 → staggered.
+      u.guardMax = tmpl.guardMax || 0;
+      u.guard    = u.guardMax;
+      u.staggered = false;
+      u.facing = 'L';           // enemies start facing left (toward party)
       units.push(u);
     });
 
@@ -248,6 +316,9 @@ const BATTLE = (() => {
       selectedSkillKey = null;
       moveHighlight    = [];
       targetHighlight  = [];
+      // Gain +1 Momentum each turn (capped); reset any pending boost.
+      unit.momentum = Math.min(MOMENTUM_MAX, (unit.momentum || 0) + 1);
+      pendingBoost  = 0;
     } else {
       phase = 'enemyTurn';
       aiDelay = 380;
@@ -343,13 +414,25 @@ const BATTLE = (() => {
     }
     if (enemyAlive.length === 0) {
       phase = 'victory';
+      // Collect drops from defeated enemies
+      battleDrops = [];
+      for (const u of units) {
+        if (!u.isPlayer && u.dead && u.templateKey) {
+          const tmpl = DATA.ENEMY_TEMPLATES[u.templateKey];
+          if (tmpl && tmpl.drops) {
+            const drops = DATA.rollDrops(tmpl.drops);
+            battleDrops.push(...drops);
+          }
+        }
+      }
       // Victory banter
-      const victoryBanter = DATA.getBanter('victory');
+      const victoryBanter = DATA.getBanter('victory', presentNames);
       if (victoryBanter) {
         setTimeout(() => UI.showBattleQuote(victoryBanter.speaker, victoryBanter.text, 2500), 600);
       }
       setTimeout(() => {
-        if (onBattleEnd) onBattleEnd('victory', units.filter(u => u.isPlayer), varethPowerAccepted);
+        battleStats.duration = Math.floor((Date.now() - battleStats.startTime) / 1000);
+        if (onBattleEnd) onBattleEnd('victory', units.filter(u => u.isPlayer), varethPowerAccepted, battleInventory, battleDrops, battleStats);
       }, 1400);
       UI.spawnParticles(450, 300, 'victory', 25);
       return true;
@@ -359,12 +442,42 @@ const BATTLE = (() => {
 
   // ── Update ───────────────────────────────────────────────────
   function update(dt) {
+    // Hit-stop: briefly freeze the sim for impact. Flash/shake keep ticking
+    // (updated below) so the frozen frame still reads as a deliberate punch.
+    if (hitStopTimer > 0) {
+      hitStopTimer -= dt;
+      if (flashTimer > 0) { flashTimer -= dt; flashAlpha = Math.max(0, flashTimer / 200); }
+      UI.updateShake();
+      return;
+    }
+
     pulseT += dt * 0.003;
     if (flashTimer > 0) {
       flashTimer -= dt;
       flashAlpha = Math.max(0, flashTimer / 200);
     }
     dynamicTerrainTick += dt;
+
+    // Weather effects
+    if (weather === 'storm') {
+      weatherTimer += dt;
+      // Random lightning strike every 8-12 seconds
+      if (weatherTimer > 8000 + Math.random() * 4000) {
+        weatherTimer = 0;
+        doLightningStrike();
+      }
+    }
+    // Save weather for draw function
+    currentWeather = weather;
+
+    // Quick-save (F5) and Quick-load (F9)
+    if (INPUT.wasPressed('F5')) {
+      quickSave();
+      UI.showNotif('Battle Saved!', '#88aaff', 2000);
+    }
+    if (INPUT.wasPressed('F9')) {
+      quickLoad();
+    }
 
     // Update tooltip from mouse position
     const mp = INPUT.getMousePos();
@@ -397,7 +510,8 @@ const BATTLE = (() => {
       if (aiDelay <= 0) doEnemyTurn();
       return;
     }
-    if (phase === 'playerMenu' || phase === 'playerMove' || phase === 'playerTarget') {
+    if (phase === 'playerMenu' || phase === 'playerMove' || phase === 'playerTarget' ||
+        phase === 'playerItems' || phase === 'itemTarget') {
       handlePlayerInput();
     }
   }
@@ -424,6 +538,7 @@ const BATTLE = (() => {
 
     if (phase === 'playerMove') {
       if (moveHighlight.some(c => c.col === col && c.row === row)) {
+        if (col !== cu.col) cu.facing = col > cu.col ? 'R' : 'L';  // face movement dir
         cu.col = col; cu.row = row;
         moveHighlight = [];
         pendingMove   = { col, row };
@@ -433,25 +548,91 @@ const BATTLE = (() => {
       if (targetHighlight.some(c => c.col === col && c.row === row)) {
         executeSkill(cu, selectedSkillKey, col, row);
       }
+    } else if (phase === 'itemTarget') {
+      const t = targetHighlight.find(c => c.col === col && c.row === row);
+      if (t && t.unit) {
+        if (useConsumable(cu, selectedItemKey, t.unit)) {
+          phase = 'animating';
+          setTimeout(() => {
+            phase = 'playerMenu';
+            targetHighlight = [];
+            selectedItemKey = null;
+          }, 400);
+        }
+      }
     }
   }
 
   function handlePanelClick(click, cu) {
     const my = click.y;
 
-    if (phase === 'playerMenu') {
-      // Move button y:108-138
-      if (my >= 108 && my <= 138 && !pendingMove) {
+    // Latent Power activation (glowing button when gauge full)
+    if (cu.isPlayer && phase === 'playerMenu' && (cu.latent || 0) >= LATENT_MAX) {
+      if (my >= LATENT_Y && my <= LATENT_Y + LATENT_H &&
+          click.x >= PANEL_X + 4 && click.x <= PANEL_X + PANEL_W - 4) {
         if (typeof AUDIO !== 'undefined') AUDIO.sfx.menuSelect();
-        moveHighlight = getMoveRange(cu);
-        phase = 'playerMove';
+        useLatent(cu);
         return;
       }
-      // Skill buttons starting at y:165, each 38px
+    }
+
+    // Momentum boost −/+ (fixed strip near panel bottom; playerMenu/playerTarget)
+    if (cu.isPlayer && (phase === 'playerMenu' || phase === 'playerTarget')) {
+      const ctrlY = MOM_Y + 30;
+      if (my >= ctrlY && my <= ctrlY + MOM_BTN_H) {
+        const minusX = PANEL_X + 8, plusX = PANEL_X + PANEL_W - 8 - MOM_BTN_W;
+        const maxBoost = Math.min(3, cu.momentum || 0);
+        if (click.x >= minusX && click.x <= minusX + MOM_BTN_W) {
+          if (pendingBoost > 0) { pendingBoost--; if (typeof AUDIO!=='undefined') AUDIO.sfx.menuSelect(); }
+          return;
+        }
+        if (click.x >= plusX && click.x <= plusX + MOM_BTN_W) {
+          if (pendingBoost < maxBoost) { pendingBoost++; if (typeof AUDIO!=='undefined') AUDIO.sfx.menuSelect(); }
+          return;
+        }
+      }
+    }
+
+    // ACTION_Y matches the dynamic y value at start of action menu in drawPanel:
+    // 10 (start) + 56 (portrait) + 14 (name) + 18 (class) + 18 (hp) + 20 (mp)
+    // + 14 (turns label) + 22 (turn queue) + 6 (divider) = 178
+    const ACTION_Y = 178;
+
+    if (phase === 'playerMenu' || phase === 'playerTarget') {
+      let y = ACTION_Y;
+
+      // MOVE button: h=28
+      if (my >= y && my <= y+28) {
+        if (phase === 'playerMenu' && !pendingMove) {
+          if (typeof AUDIO !== 'undefined') AUDIO.sfx.menuSelect();
+          moveHighlight = getMoveRange(cu);
+          phase = 'playerMove';
+        }
+        return;
+      }
+      y += 32;
+
+      // ITEMS button: h=22
+      if (my >= y && my <= y+22) {
+        if (phase === 'playerMenu') {
+          const hasItems = Object.keys(battleInventory).length > 0;
+          if (!hasItems) { UI.showNotif('No items!', '#ff4444', 1200); return; }
+          if (typeof AUDIO !== 'undefined') AUDIO.sfx.menuSelect();
+          phase = 'playerItems';
+        }
+        return;
+      }
+      y += 26;
+
+      // ABILITIES header: h=18
+      y += 18;
+
+      // Skill buttons: each h=40, spaced 44px
       const skills = cu.skills || [];
+      const skillsStartY = y;
       for (let i = 0; i < skills.length; i++) {
-        const sy = 165 + i * 42;
-        if (my >= sy && my <= sy+36) {
+        const sy = skillsStartY + i * 44;
+        if (my >= sy && my <= sy+40) {
           const skKey = skills[i];
           const sk    = DATA.SKILLS[skKey];
           if (!sk) return;
@@ -463,22 +644,48 @@ const BATTLE = (() => {
           return;
         }
       }
-      // Wait button
-      const waitY = 165 + skills.length * 42 + 8;
-      if (my >= waitY && my <= waitY+32) {
+      y = skillsStartY + skills.length * 44;
+
+      // WAIT button: y+4, h=28
+      const waitY = y + 4;
+      if (my >= waitY && my <= waitY+28) {
         if (typeof AUDIO !== 'undefined') AUDIO.sfx.menuBack();
         endPlayerTurn(); return;
       }
-      // Cancel (in target mode)
+
+      // CANCEL button (playerTarget only): waitY+32, h=26
+      if (phase === 'playerTarget') {
+        const cancelY = waitY + 32;
+        if (my >= cancelY && my <= cancelY+26) {
+          phase = 'playerMenu'; targetHighlight = []; selectedSkillKey = null;
+        }
+      }
     } else if (phase === 'playerMove') {
-      if (my >= 150 && my <= 178) {
+      // CANCEL: ACTION_Y+34, h=24
+      const cancelY = ACTION_Y + 34;
+      if (my >= cancelY && my <= cancelY+24) {
         phase = 'playerMenu'; moveHighlight = []; selectedSkillKey = null;
       }
-    } else if (phase === 'playerTarget') {
-      const skills = (cu && cu.skills) || [];
-      const cancelY = 165 + skills.length * 42 + 50;
-      if (my >= cancelY && my <= cancelY+28) {
-        phase = 'playerMenu'; moveHighlight = []; targetHighlight = []; selectedSkillKey = null;
+    } else if (phase === 'playerItems' || phase === 'itemTarget') {
+      let y = ACTION_Y + 16; // past ITEMS label
+      const itemKeys = Object.keys(battleInventory);
+      for (let i = 0; i < itemKeys.length; i++) {
+        const iy = y + i * 34;
+        if (my >= iy && my <= iy+30) {
+          const itemKey = itemKeys[i];
+          const item = DATA.CONSUMABLES[itemKey];
+          if (!item) return;
+          if (typeof AUDIO !== 'undefined') AUDIO.sfx.menuSelect();
+          selectedItemKey = itemKey;
+          targetHighlight = getItemTargetRange(cu, itemKey);
+          phase = 'itemTarget';
+          return;
+        }
+      }
+      // CANCEL button
+      const cancelY = y + itemKeys.length * 34 + 8;
+      if (my >= cancelY && my <= cancelY+24) {
+        phase = 'playerMenu'; targetHighlight = []; selectedItemKey = null;
       }
     }
   }
@@ -487,11 +694,93 @@ const BATTLE = (() => {
     moveHighlight    = [];
     targetHighlight  = [];
     pendingMove      = null;
+    battleStats.turnsTaken++;
     selectedSkillKey = null;
+    selectedItemKey  = null;
     const cu = currentUnit();
     if (cu) cu.hasActedThisRound = true;
     phase = 'init';
     advanceCT();
+  }
+
+  // ── Battle Log ────────────────────────────────────────────────
+  function addBattleLog(text, type = 'normal') {
+    const entry = {
+      text,
+      type, // 'attack', 'heal', 'item', 'status', 'normal'
+      turn: battleStats.turnsTaken,
+      time: Date.now(),
+    };
+    battleLog.push(entry);
+    if (battleLog.length > MAX_LOG_ENTRIES) {
+      battleLog.shift(); // Remove oldest entry
+    }
+  }
+
+  // ── Consumable items ─────────────────────────────────────────
+  function useConsumable(user, itemKey, target) {
+    const item = DATA.CONSUMABLES[itemKey];
+    if (!item) return false;
+    if (!battleInventory[itemKey] || battleInventory[itemKey] <= 0) return false;
+
+    // Decrement count
+    battleInventory[itemKey]--;
+    if (battleInventory[itemKey] <= 0) delete battleInventory[itemKey];
+
+    // Apply effects
+    if (item.healHp && target) {
+      const amt = Math.min(item.healHp, target.maxHp - target.hp);
+      target.hp += amt;
+      spawnFloatingText(target.col, target.row, `+${amt} HP`, '#44ff88');
+      UI.spawnParticles(target.col * CELL + GRID_X + CELL/2, target.row * CELL + GRID_Y + CELL/2, 'heal', 8);
+      if (typeof AUDIO !== 'undefined') AUDIO.sfx.heal();
+    }
+    if (item.healMp && target) {
+      const amt = Math.min(item.healMp, target.maxMp - target.mp);
+      target.mp += amt;
+      spawnFloatingText(target.col, target.row, `+${amt} MP`, '#4488ff');
+    }
+    if (item.reviveHp && target && target.dead) {
+      target.dead = false;
+      target.hp = Math.floor(target.maxHp * item.reviveHp);
+      spawnFloatingText(target.col, target.row, 'REVIVED!', '#ffdd44');
+      UI.spawnParticles(target.col * CELL + GRID_X + CELL/2, target.row * CELL + GRID_Y + CELL/2, 'holy', 10);
+      if (typeof AUDIO !== 'undefined') AUDIO.sfx.heal();
+    }
+    if (item.cure && target) {
+      // Remove status effects
+      if (target.statusEffects) {
+        target.statusEffects = target.statusEffects.filter(se => se.type !== item.cure);
+      }
+      spawnFloatingText(target.col, target.row, `Cured!`, '#88ff88');
+    }
+
+    // Award skill XP for using item
+    if (user && user.isPlayer && !user._itemXpGiven) {
+      user._itemXpGiven = true; // Only once per battle to prevent farming
+    }
+
+    // Track items used
+    battleStats.itemsUsed++;
+
+    // Log item usage
+    const targetName = target ? target.name : 'self';
+    addBattleLog(`${user.name} used ${item.name} on ${targetName}`, 'item');
+
+    return true;
+  }
+
+  function getItemTargetRange(user, itemKey) {
+    const item = DATA.CONSUMABLES[itemKey];
+    if (!item) return [];
+    // Items target allies (living for heal/mp, dead for revive)
+    const targets = [];
+    for (const u of units) {
+      if (!u.isPlayer) continue;
+      if (item.reviveHp && u.dead) targets.push({ col: u.col, row: u.row, unit: u });
+      else if (!item.reviveHp && !u.dead) targets.push({ col: u.col, row: u.row, unit: u });
+    }
+    return targets;
   }
 
   // ── Terrain helpers ─────────────────────────────────────────
@@ -623,6 +912,20 @@ const BATTLE = (() => {
 
     caster.mp = Math.max(0, caster.mp - sk.mp);
 
+    // ── Momentum boost: spend banked momentum to amplify this action ──
+    // boost 0..3 → damage/heal ×(1 + 0.5·boost), break power +boost.
+    const boost = caster.isPlayer ? Math.min(pendingBoost, caster.momentum || 0) : 0;
+    if (boost > 0) {
+      caster.momentum -= boost;
+      addFloat(caster, `BOOST ×${boost + 1}`, '#ffdd55');
+      UI.screenShake(2 + boost, 3);
+    }
+    pendingBoost = 0;
+    const boostMult  = 1 + 0.5 * boost;
+    // Skills carry a per-cast breakPower (base 1) so weakness hits deplete
+    // more guard when boosted. Cloned so we never mutate the shared def.
+    const boostedSk  = boost > 0 ? Object.assign({}, sk, { breakPower: 1 + boost }) : sk;
+
     const tBonus = terrainAtkBonus(caster.col, caster.row);
 
     // ── SFX dispatch ────────────────────────────────────────────
@@ -645,13 +948,14 @@ const BATTLE = (() => {
       case 'physical': {
         const target = getUnitAt(targetCol, targetRow);
         if (target) {
-          let mult = sk.mult;
+          let mult = sk.mult * boostMult;
           // Double next attack (Lyra's twinShadow)
           if (caster.doubleNextAtk) { mult *= 2; caster.doubleNextAtk = false; }
           // Assassinate: only if target hasn't acted
           if (skKey === 'assassinate' && target.hasActedThisRound) {
             UI.showNotif('Target already acted!', '#ff4444', 1500);
             caster.mp += sk.mp; // refund
+            caster.momentum += boost; // refund momentum too
             return;
           }
           let dmg = calcPhysDmg(caster, target, mult, tBonus);
@@ -659,22 +963,25 @@ const BATTLE = (() => {
           if (Math.random() * 100 < 5 + (caster.luck || 0) / 10) {
             dmg = Math.floor(dmg * 1.5);
             addFloatXY(targetCol*CELL+GRID_X+CELL/2-14, targetRow*CELL+GRID_Y+CELL/2-30, 'CRIT!', '#ffff44');
+            hitStop(70); flashBang('#ffffaa', 0.3); UI.screenShake(5, 4);
             // Critical hit banter
             if (caster.isPlayer) {
-              const critBanter = DATA.getBanter('criticalHit');
+              // The attacker delivers the crit line (fall back to any present speaker).
+              const critBanter = DATA.getBanter('criticalHit', [caster.name])
+                              || DATA.getBanter('criticalHit', presentNames);
               if (critBanter) {
                 setTimeout(() => UI.showBattleQuote(critBanter.speaker, critBanter.text, 2000), 300);
               }
             }
           }
-          applyHit(caster, target, dmg, sk, 'physical');
+          applyHit(caster, target, dmg, boostedSk, 'physical');
           // Blade Storm: hit ALL adjacent
           if (skKey === 'bladeStorm') {
             for (const u of units) {
               if (!u.dead && !u.isPlayer && u !== target) {
                 if (Math.abs(u.col-caster.col)<=1 && Math.abs(u.row-caster.row)<=1) {
                   const dmg2 = calcPhysDmg(caster, u, mult, tBonus);
-                  applyHit(caster, u, dmg2, sk, 'physical');
+                  applyHit(caster, u, dmg2, boostedSk, 'physical');
                 }
               }
             }
@@ -687,8 +994,8 @@ const BATTLE = (() => {
           for (const u of units) {
             if (!u.dead && u.isPlayer !== caster.isPlayer) {
               if (Math.abs(u.col-targetCol)<=1 && Math.abs(u.row-targetRow)<=1) {
-                const dmg = calcMagDmg(caster, u, sk.mult, tBonus);
-                applyHit(caster, u, dmg, sk, 'magic');
+                const dmg = calcMagDmg(caster, u, sk.mult * boostMult, tBonus);
+                applyHit(caster, u, dmg, boostedSk, 'magic');
               }
             }
           }
@@ -696,8 +1003,8 @@ const BATTLE = (() => {
           // Supernova
           for (const u of units) {
             if (!u.dead && u.isPlayer !== caster.isPlayer) {
-              const dmg = calcMagDmg(caster, u, sk.mult, tBonus);
-              applyHit(caster, u, dmg, sk, 'magic');
+              const dmg = calcMagDmg(caster, u, sk.mult * boostMult, tBonus);
+              applyHit(caster, u, dmg, boostedSk, 'magic');
             }
           }
           // Recoil
@@ -725,10 +1032,10 @@ const BATTLE = (() => {
         } else {
           const target = getUnitAt(targetCol, targetRow);
           if (target) {
-            let dmgMult = sk.mult;
+            let dmgMult = sk.mult * boostMult;
             if (sk.vsCorrupted && !target.isPlayer) dmgMult *= 1.4;
             const dmg = calcMagDmg(caster, target, dmgMult, tBonus);
-            applyHit(caster, target, dmg, sk, 'magic');
+            applyHit(caster, target, dmg, boostedSk, 'magic');
           }
         }
         break;
@@ -737,8 +1044,8 @@ const BATTLE = (() => {
         // Starlight Strike: 3x ATK + 1x MAG
         const target = getUnitAt(targetCol, targetRow);
         if (target) {
-          const physDmg = calcPhysDmg(caster, target, sk.mult, tBonus);
-          const magDmg  = calcMagDmg(caster, target, sk.magMult || 1.0, tBonus);
+          const physDmg = calcPhysDmg(caster, target, sk.mult * boostMult, tBonus);
+          const magDmg  = calcMagDmg(caster, target, (sk.magMult || 1.0) * boostMult, tBonus);
           const total = physDmg + magDmg;
           applyRawDamage(target, total);
           addFloat(target, `-${total}`, '#ffcc44');
@@ -749,21 +1056,25 @@ const BATTLE = (() => {
       }
       case 'heal': {
         if (sk.target === 'allAlly') {
+          let totalHealed = 0;
           for (const u of units) {
             if (!u.dead && u.isPlayer === caster.isPlayer) {
-              const amt = sk.healBase + caster.mag;
+              const amt = Math.floor((sk.healBase + caster.mag) * boostMult);
               u.hp = Math.min(u.maxHp, u.hp + amt);
+              totalHealed += amt;
               addFloat(u, `+${amt}`, '#44ff88');
               UI.spawnParticles(GRID_X+u.col*CELL+CELL/2, GRID_Y+u.row*CELL+CELL/2, 'heal', 6);
             }
           }
+          addBattleLog(`${caster.name} healed allies for ${totalHealed} HP`, 'heal');
         } else {
           const target = getUnitAt(targetCol, targetRow);
           if (target) {
-            const amt = sk.healBase + caster.mag;
+            const amt = Math.floor((sk.healBase + caster.mag) * boostMult);
             target.hp = Math.min(target.maxHp, target.hp + amt);
             addFloat(target, `+${amt}`, '#44ff88');
             UI.spawnParticles(GRID_X+target.col*CELL+CELL/2, GRID_Y+target.row*CELL+CELL/2, 'heal', 8);
+            addBattleLog(`${caster.name} healed ${target.name} for ${amt} HP`, 'heal');
           }
         }
         break;
@@ -775,17 +1086,20 @@ const BATTLE = (() => {
           dead.hp   = Math.floor(dead.maxHp * sk.revivePercent);
           addFloatXY(GRID_X+dead.col*CELL+CELL/2, GRID_Y+dead.row*CELL+CELL/2-20, 'REVIVED!', '#ffffff');
           UI.spawnParticles(GRID_X+dead.col*CELL+CELL/2, GRID_Y+dead.row*CELL+CELL/2, 'heal', 14);
+          addBattleLog(`${caster.name} revived ${dead.name}!`, 'heal');
         }
         break;
       }
       case 'reviveAll': {
         // Miracle
+        let revivedCount = 0;
         for (const u of units) {
           if (u.dead && u.isPlayer === caster.isPlayer) {
             u.dead = false;
             u.hp   = Math.floor(u.maxHp * sk.reviveAllPercent);
             addFloat(u, 'MIRACLE!', '#ffffff');
             UI.spawnParticles(GRID_X+u.col*CELL+CELL/2, GRID_Y+u.row*CELL+CELL/2, 'heal', 10);
+            revivedCount++;
           }
         }
         for (const u of units) {
@@ -794,6 +1108,7 @@ const BATTLE = (() => {
             addFloat(u, '+MIRACLE', '#44ff88');
           }
         }
+        addBattleLog(`${caster.name} cast Miracle! (revived ${revivedCount})`, 'heal');
         break;
       }
       case 'buff': {
@@ -850,16 +1165,19 @@ const BATTLE = (() => {
           addFloat(u, 'ATK↑', '#44ff44');
         }
       }
+      addBattleLog(`${caster.name} boosted party ATK!`, 'status');
     } else if (sk.effect === 'guardBuff') {
       caster.isGuarding = true;
       caster.buffs.push({ stat:'guard', mult:1, turnsLeft:sk.buffTurns });
       addFloat(caster, 'GUARD', '#4488ff');
+      addBattleLog(`${caster.name} is guarding allies!`, 'status');
     } else if (sk.effect === 'shield') {
       const target = getUnitAt(targetCol, targetRow);
       if (target) {
         target.shieldActive = true;
         target.shieldPct    = sk.shieldPct || 0.5;
         addFloat(target, 'SHIELD', '#4488ff');
+        addBattleLog(`${caster.name} shielded ${target.name}!`, 'status');
       }
     } else if (sk.effect === 'magAtkBuff') {
       const target = getUnitAt(targetCol, targetRow);
@@ -870,10 +1188,15 @@ const BATTLE = (() => {
       }
     } else if (sk.effect === 'barrier') {
       const target = getUnitAt(targetCol, targetRow);
-      if (target) { target.barrierActive = true; addFloat(target, 'BARRIER', '#88aaff'); }
+      if (target) {
+        target.barrierActive = true;
+        addFloat(target, 'BARRIER', '#88aaff');
+        addBattleLog(`${caster.name} gave ${target.name} magic barrier!`, 'status');
+      }
     } else if (sk.effect === 'doubleNext') {
       caster.doubleNextAtk = true;
       addFloat(caster, 'SHADOW↑↑', '#aa44ff');
+      addBattleLog(`${caster.name} prepares shadow strike!`, 'status');
     } else if (sk.effect === 'defBuff') {
       const target = getUnitAt(targetCol, targetRow);
       if (target) {
@@ -922,28 +1245,89 @@ const BATTLE = (() => {
       return;
     }
     const e = sk.effect;
-    if (e === 'stun') { target.statusEffects.push({ type:'stun', turnsLeft:1 }); addFloat(target,'STUN','#ffff44'); }
-    else if (e === 'freeze') { target.statusEffects.push({ type:'freeze', turnsLeft:1 }); addFloat(target,'FREEZE','#88ccff'); }
-    else if (e === 'poison') { target.statusEffects.push({ type:'poison', value: sk.poisonDmg||5, turnsLeft: sk.poisonTurns||3 }); addFloat(target,'POISON','#aa44ff'); }
-    else if (e === 'burn')  { target.statusEffects.push({ type:'burn', turnsLeft:2 }); addFloat(target,'BURN','#ff6600'); }
-    else if (e === 'blind') { target.statusEffects.push({ type:'blind', turnsLeft: sk.blindTurns||2 }); addFloat(target,'BLIND','#888888'); }
-    else if (e === 'berserk') { target.statusEffects.push({ type:'berserk', turnsLeft: sk.berserkTurns||2 }); addFloat(target,'BERSERK','#ff4444'); }
+    const tx = GRID_X+target.col*CELL+CELL/2;
+    const ty = GRID_Y+target.row*CELL+CELL/2;
+    
+    if (e === 'stun') { 
+      target.statusEffects.push({ type:'stun', turnsLeft:1 }); 
+      addFloat(target,'STUN','#ffff44');
+      UI.spawnParticles(tx, ty, 'buff', 8);
+      addBattleLog(`${target.name} was STUNNED!`, 'status');
+    }
+    else if (e === 'freeze') { 
+      target.statusEffects.push({ type:'freeze', turnsLeft:1 }); 
+      addFloat(target,'FREEZE','#88ccff');
+      UI.spawnParticles(tx, ty, 'magic', 10);
+      addBattleLog(`${target.name} was FROZEN!`, 'status');
+    }
+    else if (e === 'poison') { 
+      target.statusEffects.push({ type:'poison', value: sk.poisonDmg||5, turnsLeft: sk.poisonTurns||3 }); 
+      addFloat(target,'POISON','#aa44ff');
+      UI.spawnParticles(tx, ty, 'poison', 8);
+      addBattleLog(`${target.name} was POISONED!`, 'status');
+    }
+    else if (e === 'burn')  { 
+      target.statusEffects.push({ type:'burn', turnsLeft:2 }); 
+      addFloat(target,'BURN','#ff6600');
+      UI.spawnParticles(tx, ty, 'fire', 10);
+      addBattleLog(`${target.name} was BURNED!`, 'status');
+    }
+    else if (e === 'blind') { 
+      target.statusEffects.push({ type:'blind', turnsLeft: sk.blindTurns||2 }); 
+      addFloat(target,'BLIND','#888888');
+      UI.spawnParticles(tx, ty, 'debuff', 6);
+      addBattleLog(`${target.name} was BLINDED!`, 'status');
+    }
+    else if (e === 'berserk') { 
+      target.statusEffects.push({ type:'berserk', turnsLeft: sk.berserkTurns||2 }); 
+      addFloat(target,'BERSERK','#ff4444');
+      UI.spawnParticles(tx, ty, 'fire', 8);
+      addBattleLog(`${target.name} went BERSERK!`, 'status');
+    }
     else if (e === 'blindAtkDown') {
       target.statusEffects.push({ type:'blind',  turnsLeft:2 });
       target.buffs.push({ stat:'atk', mult:0.75, turnsLeft:2 });
       addFloat(target,'NIGHTMARE','#440055');
+      UI.spawnParticles(tx, ty, 'void', 12);
+      addBattleLog(`${target.name} was afflicted with NIGHTMARE!`, 'status');
     }
-    else if (e === 'defDebuff') { target.buffs.push({ stat:'def', mult:1+(sk.buffAmt||-.3), turnsLeft:sk.buffTurns||2 }); addFloat(target,'DEF↓','#ff4444'); }
-    else if (e === 'atkDebuff') { target.buffs.push({ stat:'atk', mult:1+(sk.buffAmt||-.3), turnsLeft:sk.buffTurns||2 }); addFloat(target,'ATK↓','#ff8844'); }
-    else if (e === 'defDown')   { target.buffs.push({ stat:'def', mult:0.7, turnsLeft:2 }); addFloat(target,'DEF↓','#ff4444'); }
-    else if (e === 'defShred')  { target.buffs.push({ stat:'def', mult:0, turnsLeft:2 }); addFloat(target,'SHRED!','#ff0000'); }
-    else if (e === 'steal')     { /* pilfer: visual only */ addFloat(target,'STOLEN!','#ffaa00'); }
+    else if (e === 'defDebuff') { 
+      target.buffs.push({ stat:'def', mult:1+(sk.buffAmt||-.3), turnsLeft:sk.buffTurns||2 }); 
+      addFloat(target,'DEF↓','#ff4444');
+      UI.spawnParticles(tx, ty, 'debuff', 6);
+      addBattleLog(`${target.name}'s DEFENSE was lowered!`, 'status');
+    }
+    else if (e === 'atkDebuff') { 
+      target.buffs.push({ stat:'atk', mult:1+(sk.buffAmt||-.3), turnsLeft:sk.buffTurns||2 }); 
+      addFloat(target,'ATK↓','#ff8844');
+      UI.spawnParticles(tx, ty, 'debuff', 6);
+      addBattleLog(`${target.name}'s ATTACK was lowered!`, 'status');
+    }
+    else if (e === 'defDown')   { 
+      target.buffs.push({ stat:'def', mult:0.7, turnsLeft:2 }); 
+      addFloat(target,'DEF↓','#ff4444');
+      UI.spawnParticles(tx, ty, 'debuff', 6);
+      addBattleLog(`${target.name}'s DEFENSE was lowered!`, 'status');
+    }
+    else if (e === 'defShred')  { 
+      target.buffs.push({ stat:'def', mult:0, turnsLeft:2 }); 
+      addFloat(target,'SHRED!','#ff0000');
+      UI.spawnParticles(tx, ty, 'debuff', 10);
+      addBattleLog(`${target.name}'s DEFENSE was SHREDDED!`, 'status');
+    }
+    else if (e === 'steal')     { addFloat(target,'STOLEN!','#ffaa00'); }
     else if (e === 'mpDrain')   {
       const amt = Math.min(target.mp, sk.drainAmt || 20);
       target.mp = Math.max(0, target.mp - amt);
       addFloat(target, `-${amt} MP`, '#aa66ff');
+      UI.spawnParticles(tx, ty, 'magic', 6);
+      addBattleLog(`${target.name} lost ${amt} MP!`, 'status');
     }
-    else if (e === 'guardAlly') { addFloat(target, 'LOYALTY', '#ffcc44'); }
+    else if (e === 'guardAlly') { 
+      addFloat(target, 'LOYALTY', '#ffcc44');
+      UI.spawnParticles(tx, ty, 'buff', 6);
+      addBattleLog(`${target.name} is protected by LOYALTY!`, 'status');
+    }
   }
 
   // ── Damage calculation ───────────────────────────────────────
@@ -951,6 +1335,11 @@ const BATTLE = (() => {
     let val = unit[stat] || 0;
     for (const b of unit.buffs) {
       if (b.stat === stat) val = Math.floor(val * b.mult);
+    }
+    // Support Bond (Phase 1b): each adjacent ally shores up DEF (+8%, cap +24%).
+    if (stat === 'def') {
+      const allies = Math.min(3, DATA.adjacentAllies(unit, units));
+      if (allies > 0) val = Math.floor(val * (1 + 0.08 * allies));
     }
     return Math.max(0, val);
   }
@@ -962,7 +1351,7 @@ const BATTLE = (() => {
     hardcore:  { dmgMult: 1.20 },
   };
 
-  function calcPhysDmg(caster, target, mult, terrainMult) {
+  function calcPhysDmg(caster, target, mult, terrainMult, isRanged) {
     const atkStat = getBuffedStat(caster, 'atk');
     const defStat = getBuffedStat(target, 'def');
     // Terrain / physical resist
@@ -970,6 +1359,10 @@ const BATTLE = (() => {
     const base = Math.max(1, atkStat * mult * (1 + terrainMult) - defStat * 0.5);
     const rand = 0.88 + Math.random() * 0.24;
     let dmg = Math.max(1, Math.floor(base * rand * (1 - physResist)));
+    // Fog weather: melee attacks get +10% damage (crit bonus)
+    if (weather === 'fog' && !isRanged) {
+      dmg = Math.floor(dmg * 1.1);
+    }
     // Apply difficulty modifier for player targets
     if (target.isPlayer && !caster.isPlayer) {
       const mod = DIFFICULTY_MODS[difficulty] || DIFFICULTY_MODS.normal;
@@ -993,15 +1386,84 @@ const BATTLE = (() => {
     return dmg;
   }
 
+  // Called when an attack hits a target's weakness. Records the discovered
+  // token for the bestiary and depletes the target's guard (Stagger).
+  function onWeaknessHit(caster, target, sk, breakPower) {
+    if (target.isPlayer || !target.templateKey) return;
+    const tokens = [sk.weaponType, sk.element].filter(t => t && t !== 'none');
+    if (!battleStats.weaknessesFound[target.templateKey]) {
+      battleStats.weaknessesFound[target.templateKey] = [];
+    }
+    const found = battleStats.weaknessesFound[target.templateKey];
+    for (const t of tokens) {
+      if (DATA.counterMult({ weaponType: sk.weaponType===t?t:undefined, element: sk.element===t?t:undefined }, target) > 1
+          && !found.includes(t)) {
+        found.push(t);
+      }
+    }
+    // ── Stagger: deplete guard; at 0 the target breaks ──
+    if (target.guardMax > 0 && !target.staggered) {
+      target.guard = Math.max(0, target.guard - (breakPower || 1));
+      if (target.guard === 0) triggerStagger(target);
+    }
+  }
+
+  // Break a target: it is staggered (takes +50% damage) and skips its next
+  // turn. Recovery + guard refill happen in doEnemyTurn when the skip is spent.
+  function triggerStagger(target) {
+    target.staggered = true;
+    target.staggerSkipPending = true;  // consumed on its next turn
+    addFloat(target, 'BREAK!', '#ff5566');
+    flashBang('#ff88aa', 0.4);
+    UI.screenShake(6, 5);
+    hitStop(90);
+    if (typeof AUDIO !== 'undefined' && AUDIO.sfx && AUDIO.sfx.hit) AUDIO.sfx.hit();
+    addBattleLog(`${target.name} was BROKEN!`, 'status');
+  }
+
   function applyHit(caster, target, dmg, sk, dmgType) {
     // Evasion check
     const evasionChance = terrainEvasion(target.col, target.row)
       + (target.evasionBonus || 0)
       + (target.statusEffects.find(e=>e.type==='evasion') ? (target.statusEffects.find(e=>e.type==='evasion').val||40) : 0)
-      + (nightBonus && !target.isPlayer ? 10 : 0);
+      + (nightBonus && !target.isPlayer ? 10 : 0)
+      + Math.min(3, DATA.adjacentAllies(target, units)) * 3; // Support Bond: +3% evade per adjacent ally
     if (Math.random() * 100 < evasionChance) {
       addFloat(target, 'MISS', '#999999');
       return;
+    }
+
+    // ── Stagger bonus: a broken target takes +50% until it recovers ──
+    // Applied on hits landed while already staggered (not the breaking hit).
+    if (dmg > 0 && target.staggered) dmg = Math.floor(dmg * 1.5);
+
+    // ── Positioning (Phase 1b): facing/back-attacks + flanking ──
+    // Only for melee-oriented attacks (physical/hybrid) with real positions.
+    let flankBreakBonus = 0;
+    if (dmg > 0 && (dmgType === 'physical' || dmgType === 'hybrid') && caster && caster.col != null) {
+      // Caster turns to face its target.
+      if (caster.col !== target.col) caster.facing = caster.col < target.col ? 'R' : 'L';
+      const back = DATA.backAttackMult(caster, target);
+      if (back > 1) { dmg = Math.floor(dmg * back); addFloat(target, 'BACK!', '#ff9944'); }
+      if (DATA.isFlanked(caster, target, units)) {
+        dmg = Math.floor(dmg * 1.20);
+        flankBreakBonus = 1;                      // flanking helps break guard
+        addFloat(target, 'FLANK!', '#ffbb33');
+      }
+    }
+
+    // ── Counter Web: weapon/element advantage vs weakness/resistance ──
+    // Only applies to damaging attacks with a weapon/element tag.
+    if (dmg > 0 && sk && (sk.weaponType || sk.element)) {
+      const cm = DATA.counterMult(sk, target);
+      if (cm > 1) {
+        dmg = Math.floor(dmg * cm);
+        addFloat(target, 'WEAK!', '#ffcc33');
+        onWeaknessHit(caster, target, sk, (sk.breakPower || 1) + flankBreakBonus);
+      } else if (cm < 1) {
+        dmg = Math.max(1, Math.floor(dmg * cm));
+        addFloat(target, 'RESIST', '#88aacc');
+      }
     }
 
     // Shield
@@ -1027,10 +1489,36 @@ const BATTLE = (() => {
     if (target.statusEffects.find(e=>e.type==='freeze')) dmg = Math.floor(dmg * 1.2);
 
     applyRawDamage(target, dmg);
+
+    // Track battle stats
+    if (caster && caster.name) {
+      battleStats.damageDealt[caster.name] = (battleStats.damageDealt[caster.name] || 0) + dmg;
+    }
+    if (target && target.name) {
+      battleStats.damageTaken[target.name] = (battleStats.damageTaken[target.name] || 0) + dmg;
+    }
+
+    // ── Latent Power charge (Phase 1e) ──
+    // Dealer charges on damage dealt; taker charges (more) on damage taken.
+    if (caster && caster.isPlayer && !target.isPlayer) gainLatent(caster, dmg * 0.25);
+    if (target && target.isPlayer) gainLatent(target, dmg * 0.40);
+
+    // Log attack with skill name
+    const skillName = sk && sk.name ? sk.name : 'Attack';
+    addBattleLog(`${caster.name} hit ${target.name} with ${skillName} for ${dmg}`, 'attack');
+
     const color = dmgType==='magic' ? '#ff8844' : '#ff4444';
     addFloat(target, `-${dmg}`, color);
-    UI.spawnParticles(GRID_X+target.col*CELL+CELL/2, GRID_Y+target.row*CELL+CELL/2,
-      dmgType==='magic' ? 'magic' : 'fire', 5);
+    // Element-aware impact burst (falls back to melee/magic default).
+    const impactType = elementParticle(sk && sk.element, dmgType);
+    UI.spawnParticles(GRID_X+target.col*CELL+CELL/2, GRID_Y+target.row*CELL+CELL/2, impactType, 6);
+
+    // Kill impact — a satisfying beat when a unit falls
+    if (target.dead) {
+      hitStop(80); UI.screenShake(5, 5);
+      UI.spawnParticles(GRID_X+target.col*CELL+CELL/2, GRID_Y+target.row*CELL+CELL/2,
+        target.isPlayer ? 'magic' : 'fire', 14);
+    }
 
     // Apply skill effects
     if (sk.effect === 'stun')   applyStatusEffect(target, sk);
@@ -1059,9 +1547,18 @@ const BATTLE = (() => {
     if (target.hp <= 0) {
       UI.spawnParticles(GRID_X+target.col*CELL+CELL/2, GRID_Y+target.row*CELL+CELL/2, 'death', 8);
       if (typeof AUDIO !== 'undefined') AUDIO.sfx.death();
-      // Ally death banter
+      // Track enemy defeated
+      if (!target.isPlayer) {
+        battleStats.enemiesDefeated++;
+        // Track specific enemy type killed for bestiary
+        if (target.templateKey) {
+          battleStats.enemiesKilled[target.templateKey] = (battleStats.enemiesKilled[target.templateKey] || 0) + 1;
+        }
+      }
+      // Ally death banter — a living survivor reacts (not the one who fell).
       if (target.isPlayer) {
-        const deathBanter = DATA.getBanter('allyDeath');
+        const survivors = units.filter(u => u.isPlayer && !u.dead && u.name !== target.name).map(u => u.name);
+        const deathBanter = DATA.getBanter('allyDeath', survivors);
         if (deathBanter) {
           setTimeout(() => UI.showBattleQuote(deathBanter.speaker, deathBanter.text, 2500), 400);
         }
@@ -1074,6 +1571,78 @@ const BATTLE = (() => {
   function applyRawDamage(unit, dmg) {
     unit.hp = Math.max(0, unit.hp - dmg);
     if (unit.hp <= 0) unit.dead = true;
+  }
+
+  // ── Latent Power (Phase 1e) ──────────────────────────────────
+  function gainLatent(unit, amt) {
+    if (!unit || !unit.isPlayer) return;
+    const was = unit.latent || 0;
+    unit.latent = Math.min(LATENT_MAX, was + amt);
+    if (was < LATENT_MAX && unit.latent >= LATENT_MAX) {
+      addFloat(unit, 'LATENT READY!', '#ffee66');
+      if (typeof AUDIO !== 'undefined' && AUDIO.sfx && AUDIO.sfx.levelUp) AUDIO.sfx.levelUp();
+    }
+  }
+
+  // Per-character signature ultimate. Fires the effect, empties the gauge,
+  // and ends the caster's turn. Reuses existing effect primitives.
+  function useLatent(caster) {
+    if (!caster || !caster.isPlayer || (caster.latent || 0) < LATENT_MAX) return;
+    caster.latent = 0;
+    const name = caster.name;
+    flashBang('#ffee88', 0.7); UI.screenShake(7, 6);
+    const ccx = GRID_X + caster.col*CELL + CELL/2, ccy = GRID_Y + caster.row*CELL + CELL/2;
+
+    if (name === 'Kael') {
+      // Aegis Vow — party gains a strong shield + moderate heal.
+      for (const u of units) {
+        if (!u.dead && u.isPlayer) {
+          u.shieldActive = true; u.shieldPct = 0.6;
+          const heal = Math.floor(u.maxHp * 0.35);
+          u.hp = Math.min(u.maxHp, u.hp + heal);
+          addFloat(u, 'AEGIS', '#66aaff');
+          UI.spawnParticles(GRID_X+u.col*CELL+CELL/2, GRID_Y+u.row*CELL+CELL/2, 'heal', 8);
+        }
+      }
+      addBattleLog(`${name} invokes Aegis Vow — the party is shielded!`, 'status');
+
+    } else if (name === 'Lyra') {
+      // Shadow Flurry — refund full Momentum + a free boosted strike on nearest enemy.
+      caster.momentum = MOMENTUM_MAX;
+      const tgt = units.filter(u => !u.dead && !u.isPlayer)
+        .sort((a,b)=>(Math.abs(a.col-caster.col)+Math.abs(a.row-caster.row))-(Math.abs(b.col-caster.col)+Math.abs(b.row-caster.row)))[0];
+      if (tgt) {
+        for (let i=0;i<3;i++) {
+          const dmg = calcPhysDmg(caster, tgt, 1.6, terrainAtkBonus(caster.col,caster.row));
+          applyHit(caster, tgt, dmg, { name:'Shadow Flurry', weaponType:'dagger', breakPower:2 }, 'physical');
+        }
+      }
+      addBattleLog(`${name} unleashes Shadow Flurry! Momentum restored.`, 'status');
+
+    } else if (name === 'Theron') {
+      // Vareth Surge — heavy dark burst to ALL enemies.
+      for (const u of units) {
+        if (!u.dead && !u.isPlayer) {
+          const dmg = calcMagDmg(caster, u, 3.0, terrainAtkBonus(caster.col,caster.row));
+          applyHit(caster, u, dmg, { name:'Vareth Surge', element:'dark', breakPower:2 }, 'magic');
+        }
+      }
+      UI.spawnParticles(ccx, ccy, 'void', 24);
+      addBattleLog(`${name} channels the Vareth Surge!`, 'status');
+
+    } else if (name === 'Sera') {
+      // Dawn's Grace — revive all fallen allies + full-heal the living.
+      let revived = 0;
+      for (const u of units) {
+        if (u.isPlayer && u.dead) { u.dead=false; u.hp=Math.floor(u.maxHp*0.6); addFloat(u,'DAWN!','#ffffcc'); revived++; }
+        else if (u.isPlayer) { u.hp=u.maxHp; addFloat(u,'+FULL','#66ff99'); }
+        if (u.isPlayer) UI.spawnParticles(GRID_X+u.col*CELL+CELL/2, GRID_Y+u.row*CELL+CELL/2, 'heal', 10);
+      }
+      addBattleLog(`${name} calls Dawn's Grace! (revived ${revived})`, 'heal');
+    }
+
+    checkBattleOver();
+    if (phase !== 'victory' && phase !== 'defeat') endPlayerTurn();
   }
 
   function reviveVoidShards(boss) {
@@ -1096,6 +1665,15 @@ const BATTLE = (() => {
     const stunned = eu.statusEffects.find(e => e.type==='stun' || e.type==='freeze');
     if (stunned) {
       addFloat(eu, stunned.type==='freeze' ? 'FROZEN' : 'STUNNED', '#88ccff');
+      endEnemyTurn(); return;
+    }
+    // Stagger skip: broken enemies lose this turn, then recover (guard refills).
+    if (eu.staggerSkipPending) {
+      eu.staggerSkipPending = false;
+      eu.staggered = false;
+      eu.guard = eu.guardMax;
+      addFloat(eu, 'STAGGERED', '#ff8888');
+      addBattleLog(`${eu.name} is staggered and loses a turn!`, 'status');
       endEnemyTurn(); return;
     }
     const berserk = eu.statusEffects.find(e => e.type==='berserk');
@@ -1253,7 +1831,76 @@ const BATTLE = (() => {
   function endEnemyTurn() {
     phase   = 'init';
     aiDelay = 0;
+    battleStats.turnsTaken++;
     advanceCT();
+  }
+
+  // ── Quick-save / Quick-load (Single slot) ────────────────────
+  function quickSave() {
+    const saveData = {
+      units: units.map(u => ({
+        ...u,
+        // Deep clone objects to avoid reference issues
+        buffs: [...(u.buffs || [])],
+        statusEffects: [...(u.statusEffects || [])],
+        skills: [...(u.skills || [])],
+      })),
+      battleInventory: {...battleInventory},
+      battleStats: {...battleStats, startTime: Date.now()}, // Reset timer for duration calc
+      phase,
+      currentUnitIdx,
+      difficulty,
+      battleDrops: [...battleDrops],
+      battleLog: [...battleLog],
+      savedAt: Date.now(),
+    };
+    localStorage.setItem('shattered_crown_battle_save', JSON.stringify(saveData));
+  }
+
+  function quickLoad() {
+    const saveData = localStorage.getItem('shattered_crown_battle_save');
+    if (!saveData) {
+      UI.showNotif('No quick-save found!', '#ff6644', 2000);
+      return;
+    }
+    try {
+      const data = JSON.parse(saveData);
+      // Restore battle state
+      units = data.units || [];
+      battleInventory = data.battleInventory || {};
+      battleStats = data.battleStats || {};
+      phase = data.phase || 'init';
+      currentUnitIdx = data.currentUnitIdx || 0;
+      difficulty = data.difficulty || 'normal';
+      battleDrops = data.battleDrops || [];
+      battleLog = data.battleLog || [];
+      // Restore floating texts and other arrays
+      floatingTexts = [];
+      selectedSkillKey = null;
+      selectedItemKey = null;
+      moveHighlight = [];
+      targetHighlight = [];
+      pendingMove = null;
+      UI.showNotif('Battle Loaded!', '#88ff88', 2000);
+    } catch (e) {
+      console.error('Failed to load quick-save:', e);
+      UI.showNotif('Failed to load save!', '#ff6644', 2000);
+    }
+  }
+
+  // ── Weather effects ─────────────────────────────────────────
+  function doLightningStrike() {
+    // Pick a random non-elevated unit to strike (elevated terrain is safe)
+    const targets = units.filter(u => !u.dead && terrainMap[`${u.col},${u.row}`] !== 'elevated');
+    if (targets.length === 0) return;
+    const target = targets[Math.floor(Math.random() * targets.length)];
+    const dmg = Math.floor(25 + Math.random() * 15); // 25-40 damage
+    applyRawDamage(target, dmg);
+    addFloat(target, `-${dmg} LIGHTNING!`, '#ffff44');
+    UI.spawnParticles(GRID_X+target.col*CELL+CELL/2, GRID_Y+target.row*CELL+CELL/2, 'lightning', 12);
+    flashBang('#ffffaa', 0.6);
+    UI.screenShake(4, 4);
+    addBattleLog(`Lightning struck ${target.name} for ${dmg} damage!`, 'normal');
   }
 
   // ── Flash / visual effects ───────────────────────────────────
@@ -1261,6 +1908,11 @@ const BATTLE = (() => {
     flashColor = color || '#ffffff';
     flashAlpha = alpha || 0.8;
     flashTimer = 200;
+  }
+
+  // Freeze the sim briefly for impact (crit/break/kill). Capped so it can't stall.
+  function hitStop(ms) {
+    hitStopTimer = Math.min(120, Math.max(hitStopTimer, ms || 60));
   }
 
   // ── Floating text helpers ────────────────────────────────────
@@ -1287,10 +1939,15 @@ const BATTLE = (() => {
     drawTerrainHighlights();
     drawHighlights();
     drawUnits();
+    drawWeather();
+    drawGrade();          // cinematic color grade + vignette over the diorama
     drawFloatingTexts();
     UI.drawParticles();
     drawPanel();
     UI.drawBattleQuote();  // Draw battle banter quotes
+
+    // Battle log (drawn outside shake transform)
+    drawBattleLog();
 
     // Tooltip (drawn outside shake transform to keep it stable)
     ctx.restore();
@@ -1300,14 +1957,47 @@ const BATTLE = (() => {
     UI.applyShake();
     if (phase === 'defeat') drawDefeatOverlay();
 
-    // Flash effect
+    // Flash effect — additive for a bloom-like pop over the whole frame
     if (flashAlpha > 0) {
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
       ctx.fillStyle = flashColor.startsWith('#')
-        ? UI.hexAlpha(flashColor, flashAlpha) : flashColor;
+        ? UI.hexAlpha(flashColor, flashAlpha * 0.7) : flashColor;
       ctx.fillRect(0, 0, 900, 620);
+      ctx.restore();
     }
 
     ctx.restore();
+  }
+
+  // ── Cinematic color grade + vignette (HD-2D-style depth) ──────
+  // Per-scene tint (multiply-ish via low-alpha overlay) + radial vignette,
+  // drawn over the battlefield diorama only (left of the right panel).
+  const GRADE = {
+    village:       { tint:'rgba(255,220,150,0.10)', vig:0.42 },
+    forest:        { tint:'rgba(120,200,140,0.12)', vig:0.50 },
+    town:          { tint:'rgba(255,210,140,0.10)', vig:0.44 },
+    selvara:       { tint:'rgba(255,190,120,0.12)', vig:0.46 },
+    selvara_night: { tint:'rgba(70,90,180,0.18)',   vig:0.58 },
+    undercity:     { tint:'rgba(80,90,150,0.20)',   vig:0.62 },
+    castle_hall:   { tint:'rgba(180,170,210,0.12)', vig:0.52 },
+    throne_room:   { tint:'rgba(255,205,110,0.14)', vig:0.50 },
+    vault_cracking:{ tint:'rgba(200,90,220,0.16)',  vig:0.60 },
+    vault_final:   { tint:'rgba(170,70,210,0.20)',  vig:0.64 },
+  };
+  function drawGrade() {
+    const g = GRADE[background] || GRADE.village;
+    const w = PANEL_X, h = 620;
+    // Color tint
+    ctx.fillStyle = g.tint;
+    ctx.fillRect(0, 0, w, h);
+    // Radial vignette — bright centre, dark edges
+    const cx = w/2, cy = h/2;
+    const vg = ctx.createRadialGradient(cx, cy, h*0.25, cx, cy, h*0.72);
+    vg.addColorStop(0, 'rgba(0,0,0,0)');
+    vg.addColorStop(1, `rgba(0,0,0,${g.vig})`);
+    ctx.fillStyle = vg;
+    ctx.fillRect(0, 0, w, h);
   }
 
   // ── Background drawing ───────────────────────────────────────
@@ -1326,36 +2016,48 @@ const BATTLE = (() => {
       case 'vault_final':    drawBgVaultFinal(t); break;
       default: drawBgVillage(t);
     }
+    // Roguelike floor tile texture over battle grid (Kenney CC0)
+    if (typeof SPRITES !== 'undefined') {
+      SPRITES.battleFloor(ctx, background, GRID_X, GRID_Y, CELL, GRID_COLS, GRID_ROWS, 0.42);
+    }
   }
 
   function drawBgVillage(t) {
-    const sky = ctx.createLinearGradient(0,0,0,620);
-    sky.addColorStop(0,'#080814'); sky.addColorStop(0.5,'#18140e'); sky.addColorStop(0.8,'#3a1808'); sky.addColorStop(1,'#7a2800');
-    ctx.fillStyle = sky; ctx.fillRect(0,0,900,620);
-    // Buildings silhouette
-    ctx.fillStyle = '#130800';
+    const sky = ctx.createLinearGradient(0,0,0,520);
+    sky.addColorStop(0,'#080814'); sky.addColorStop(0.5,'#18140e'); sky.addColorStop(0.8,'#1a0f0a'); sky.addColorStop(1,'#0d0805');
+    ctx.fillStyle = sky; ctx.fillRect(0,0,900,520);
+    // Dark bottom area for UI separation
+    ctx.fillStyle = '#0a0505'; ctx.fillRect(0,520,900,100);
+    // Buildings silhouette - positioned higher
+    ctx.fillStyle = '#0d0503';
     for (let i=0;i<7;i++) {
-      const bx=30+i*120, bh=180+i%3*50;
-      ctx.fillRect(bx, 620-bh, 90, bh);
+      const bx=30+i*120, bh=140+i%3*40;
+      const by=520-bh;
+      ctx.fillRect(bx, by, 90, bh);
       // Jagged top
-      ctx.beginPath(); ctx.moveTo(bx,620-bh); ctx.lineTo(bx+22,620-bh-30); ctx.lineTo(bx+45,620-bh-20); ctx.lineTo(bx+68,620-bh-35); ctx.lineTo(bx+90,620-bh); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(bx,by); ctx.lineTo(bx+22,by-25); ctx.lineTo(bx+45,by-15); ctx.lineTo(bx+68,by-28); ctx.lineTo(bx+90,by); ctx.fill();
     }
-    // Fire glow
-    for (let i=0;i<5;i++) {
-      const fx=60+i*160, fy=400+i%2*60;
-      const fg=ctx.createRadialGradient(fx,fy,8,fx,fy,55);
-      fg.addColorStop(0,`rgba(255,180,20,${0.5+0.2*Math.sin(t*3+i)})`);
-      fg.addColorStop(0.4,`rgba(255,60,0,${0.2+0.1*Math.sin(t*2+i)})`);
+    // Fire glow - positioned higher, more subtle
+    for (let i=0;i<4;i++) {
+      const fx=80+i*200, fy=420+i%2*40;
+      const fg=ctx.createRadialGradient(fx,fy,6,fx,fy,45);
+      fg.addColorStop(0,`rgba(255,140,30,${0.35+0.15*Math.sin(t*2.5+i)})`);
+      fg.addColorStop(0.5,`rgba(200,60,20,${0.15+0.08*Math.sin(t*1.8+i)})`);
       fg.addColorStop(1,'rgba(0,0,0,0)');
-      ctx.fillStyle=fg; ctx.fillRect(fx-55,fy-55,110,110);
+      ctx.fillStyle=fg; ctx.fillRect(fx-45,fy-45,90,90);
     }
-    // Embers
-    for (let i=0;i<20;i++) {
-      const ex=50+((t*30+i*47)%800), ey=200+i*18-((t*20+i*30)%300);
-      const ea=0.4+0.4*Math.sin(t*4+i);
-      ctx.beginPath(); ctx.arc(ex,ey,1.5,0,Math.PI*2);
-      ctx.fillStyle=`rgba(255,120,20,${ea})`; ctx.fill();
+    // Embers - fewer, higher up
+    for (let i=0;i<12;i++) {
+      const ex=60+((t*25+i*67)%780), ey=180+i*22-((t*15+i*25)%200);
+      if (ey > 450) continue; // keep embers above UI area
+      const ea=0.3+0.3*Math.sin(t*3+i);
+      ctx.beginPath(); ctx.arc(ex,ey,1.2,0,Math.PI*2);
+      ctx.fillStyle=`rgba(255,100,30,${ea})`; ctx.fill();
     }
+    // Bottom gradient fade for smooth transition
+    const fade = ctx.createLinearGradient(0,480,0,520);
+    fade.addColorStop(0,'rgba(0,0,0,0)'); fade.addColorStop(1,'rgba(10,5,5,0.9)');
+    ctx.fillStyle=fade; ctx.fillRect(0,480,900,40);
   }
 
   function drawBgForest(t) {
@@ -1548,61 +2250,153 @@ const BATTLE = (() => {
 
   // ── Grid drawing ─────────────────────────────────────────────
   function drawGrid() {
+    const t2 = Date.now() * 0.001;
     for (let r=0; r<GRID_ROWS; r++) {
       for (let c=0; c<GRID_COLS; c++) {
         const x = GRID_X + c*CELL, y = GRID_Y + r*CELL;
         const ttype = getTerrainAt(c, r);
 
-        // Base cell tint by terrain
-        const tints = {
-          elevated: 'rgba(255,220,140,0.07)',
-          water:    'rgba(40,80,160,0.15)',
-          forest:   'rgba(20,80,20,0.12)',
-          ruins:    'rgba(100,60,200,0.1)',
-          normal:   'rgba(0,0,0,0.18)',
-        };
-        ctx.fillStyle = tints[ttype] || tints.normal;
-        ctx.fillRect(x,y,CELL,CELL);
-
-        // Terrain detail
-        if (ttype === 'elevated') {
-          ctx.strokeStyle = 'rgba(255,220,140,0.25)'; ctx.lineWidth=1;
-          ctx.beginPath(); ctx.moveTo(x+CELL-8,y+CELL-2); ctx.lineTo(x+CELL-2,y+CELL-8); ctx.stroke();
-          ctx.beginPath(); ctx.moveTo(x+CELL-14,y+CELL-2); ctx.lineTo(x+CELL-2,y+CELL-14); ctx.stroke();
-        } else if (ttype === 'water') {
-          const t2 = Date.now()*0.001;
-          ctx.strokeStyle=`rgba(40,100,200,${0.3+0.2*Math.sin(t2+c+r)})`; ctx.lineWidth=1;
-          for (let wi=0;wi<3;wi++) ctx.strokeRect(x+2, y+4+wi*13, CELL-4, 0);
-        } else if (ttype === 'forest') {
-          ctx.fillStyle='rgba(20,80,20,0.2)';
-          ctx.beginPath(); ctx.arc(x+CELL/2,y+CELL/2,8,0,Math.PI*2); ctx.fill();
-        } else if (ttype === 'ruins') {
-          const t2=Date.now()*0.001;
-          ctx.fillStyle=`rgba(100,60,200,${0.2+0.15*Math.sin(t2*2+c+r)})`;
-          ctx.beginPath(); ctx.arc(x+CELL/2,y+CELL/2,6,0,Math.PI*2); ctx.fill();
+        // ── Roguelike sprite base per terrain type ─────────────
+        if (typeof SPRITES !== 'undefined') {
+          SPRITES.battleCell(ctx, ttype, x, y, CELL);
         }
 
-        // Grid line
-        ctx.strokeStyle = 'rgba(255,255,255,0.06)'; ctx.lineWidth=0.5;
-        ctx.strokeRect(x,y,CELL,CELL);
+        // ── Colour tint overlay to unify sprite with scene mood ─
+        const tints = {
+          elevated: 'rgba(255,220,140,0.10)',
+          water:    'rgba(20,60,140,0.32)',
+          forest:   'rgba(10,50,10,0.25)',
+          ruins:    'rgba(60,20,120,0.18)',
+          normal:   'rgba(0,0,0,0.22)',
+        };
+        ctx.fillStyle = tints[ttype] || tints.normal;
+        ctx.fillRect(x, y, CELL, CELL);
+
+        // ── Rich terrain overlay art ────────────────────────────
+        if (ttype === 'elevated') {
+          // Rocky ledge: stacked stone slabs on bottom edge + height arrows
+          ctx.fillStyle = 'rgba(180,140,60,0.30)';
+          ctx.fillRect(x+4, y+CELL-10, CELL-8, 6);
+          ctx.fillRect(x+8, y+CELL-16, CELL-16, 5);
+          // Highlight on top stone edge
+          ctx.fillStyle = 'rgba(255,220,140,0.45)';
+          ctx.fillRect(x+4, y+CELL-10, CELL-8, 2);
+          // Height indicator arrows (top-right corner)
+          ctx.strokeStyle = 'rgba(255,200,80,0.55)'; ctx.lineWidth = 1.5;
+          for (let ai = 0; ai < 3; ai++) {
+            const ay = y + 6 + ai * 6;
+            ctx.beginPath();
+            ctx.moveTo(x+CELL-14, ay+4); ctx.lineTo(x+CELL-10, ay); ctx.lineTo(x+CELL-6, ay+4);
+            ctx.stroke();
+          }
+          // Warm glow on floor
+          ctx.fillStyle = 'rgba(255,200,80,0.06)';
+          ctx.fillRect(x, y, CELL, CELL);
+
+        } else if (ttype === 'water') {
+          // Full-cell animated water ripples
+          const wt = t2 * 1.4 + c * 0.6 + r * 0.4;
+          // Deep water fill
+          ctx.fillStyle = 'rgba(10,40,120,0.38)';
+          ctx.fillRect(x, y, CELL, CELL);
+          // Wave lines sweeping the full cell
+          ctx.lineWidth = 1.2;
+          for (let wi = 0; wi < 5; wi++) {
+            const wy = y + 5 + wi * 9;
+            const amp = 1.8 + Math.sin(wt + wi * 1.1) * 1.2;
+            ctx.strokeStyle = `rgba(80,160,255,${0.30 + 0.18*Math.sin(wt*1.2+wi)})`;
+            ctx.beginPath();
+            ctx.moveTo(x, wy + Math.sin(wt + c + wi) * amp);
+            for (let wx2 = 0; wx2 <= CELL; wx2 += 8) {
+              ctx.lineTo(x + wx2, wy + Math.sin(wt + wx2 * 0.18 + wi) * amp);
+            }
+            ctx.stroke();
+          }
+          // Sparkle glints
+          for (let gi = 0; gi < 3; gi++) {
+            const gx = x + 8 + gi * 16 + Math.sin(t2 * 0.8 + gi + c) * 4;
+            const gy = y + 8 + gi * 12 + Math.cos(t2 * 1.1 + gi) * 3;
+            ctx.fillStyle = `rgba(180,230,255,${0.35 + 0.3*Math.abs(Math.sin(t2*2.5+gi+c))})`;
+            ctx.beginPath(); ctx.arc(gx % (x+CELL-4) || gx, gy, 1.2, 0, Math.PI*2); ctx.fill();
+          }
+
+        } else if (ttype === 'forest') {
+          // 2–3 tree canopy shapes
+          const trees = [
+            { ox: 0.25, oy: 0.55, r: 10 },
+            { ox: 0.65, oy: 0.45, r: 9 },
+            { ox: 0.45, oy: 0.68, r: 7 },
+          ];
+          for (const tr of trees) {
+            const tx2 = x + CELL * tr.ox, ty2 = y + CELL * tr.oy;
+            // Trunk
+            ctx.fillStyle = 'rgba(50,25,10,0.55)';
+            ctx.fillRect(tx2-2, ty2, 4, CELL*(1-tr.oy));
+            // Dark undercanopy
+            ctx.fillStyle = 'rgba(8,40,8,0.65)';
+            ctx.beginPath(); ctx.arc(tx2, ty2-2, tr.r, 0, Math.PI*2); ctx.fill();
+            // Mid canopy
+            ctx.fillStyle = 'rgba(18,70,18,0.55)';
+            ctx.beginPath(); ctx.arc(tx2, ty2-5, tr.r*0.75, 0, Math.PI*2); ctx.fill();
+            // Bright tip
+            ctx.fillStyle = 'rgba(30,100,20,0.45)';
+            ctx.beginPath(); ctx.arc(tx2, ty2-8, tr.r*0.50, 0, Math.PI*2); ctx.fill();
+          }
+          // Subtle magic shimmer
+          ctx.fillStyle = `rgba(40,180,60,${0.04+0.03*Math.sin(t2*0.8+c+r)})`;
+          ctx.fillRect(x, y, CELL, CELL);
+
+        } else if (ttype === 'ruins') {
+          // Crumbled stone rubble in corners
+          const rubble = [
+            [x+2,  y+2,  10, 7], [x+CELL-12, y+2,   10, 7],
+            [x+2,  y+CELL-9, 8, 7], [x+CELL-10,y+CELL-9, 8, 7],
+          ];
+          for (const [rx,ry,rw,rh] of rubble) {
+            ctx.fillStyle = 'rgba(50,35,55,0.60)'; ctx.fillRect(rx,ry,rw,rh);
+            ctx.fillStyle = 'rgba(70,50,75,0.35)'; ctx.fillRect(rx,ry,rw,2);
+          }
+          // Rune circle at centre
+          const runeAlpha = 0.28 + 0.22 * Math.sin(t2 * 1.8 + c + r);
+          ctx.strokeStyle = `rgba(160,80,255,${runeAlpha})`; ctx.lineWidth = 1;
+          ctx.beginPath(); ctx.arc(x+CELL/2, y+CELL/2, 10, 0, Math.PI*2); ctx.stroke();
+          // Rune cross
+          ctx.beginPath();
+          ctx.moveTo(x+CELL/2, y+CELL/2-10); ctx.lineTo(x+CELL/2, y+CELL/2+10);
+          ctx.moveTo(x+CELL/2-10, y+CELL/2); ctx.lineTo(x+CELL/2+10, y+CELL/2);
+          ctx.stroke();
+          // Purple glow
+          ctx.fillStyle = `rgba(120,40,220,${runeAlpha * 0.4})`;
+          ctx.beginPath(); ctx.arc(x+CELL/2, y+CELL/2, 14, 0, Math.PI*2); ctx.fill();
+        }
+
+        // ── Grid line ───────────────────────────────────────────
+        ctx.strokeStyle = 'rgba(255,255,255,0.06)'; ctx.lineWidth = 0.5;
+        ctx.strokeRect(x, y, CELL, CELL);
       }
     }
   }
 
   function drawTerrainHighlights() {
-    // Small terrain type labels on first visible row
-    for (let c=0; c<GRID_COLS; c++) {
-      const ttype = getTerrainAt(c, 0);
-      if (ttype !== 'normal') {
-        const x = GRID_X + c*CELL + 2, y = GRID_Y + 2;
-        ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(x,y,CELL-4,10);
-        const tColors = { elevated:'#ffdd88', water:'#88aaff', forest:'#88ff88', ruins:'#aa88ff' };
-        ctx.fillStyle = tColors[ttype]||'#fff';
-        ctx.font = '8px Arial'; ctx.textAlign='center'; ctx.textBaseline='top';
-        ctx.fillText(ttype.toUpperCase(), x+(CELL-4)/2, y+1);
-        ctx.textAlign='left'; ctx.textBaseline='top';
+    // Small icon badge in top-left corner of every non-normal terrain cell
+    const tColors  = { elevated:'#ffdd88', water:'#88bbff', forest:'#66ee66', ruins:'#bb88ff' };
+    const tIcons   = { elevated:'▲', water:'≋', forest:'♣', ruins:'⌖' };
+    ctx.font = '9px Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+    for (let r=0; r<GRID_ROWS; r++) {
+      for (let c=0; c<GRID_COLS; c++) {
+        const ttype = getTerrainAt(c, r);
+        if (ttype === 'normal') continue;
+        const x = GRID_X + c*CELL, y = GRID_Y + r*CELL;
+        // Small dark pill badge
+        ctx.fillStyle = 'rgba(0,0,0,0.55)';
+        ctx.beginPath();
+        ctx.roundRect ? ctx.roundRect(x+2, y+2, 16, 11, 3) : ctx.fillRect(x+2, y+2, 16, 11);
+        ctx.fill();
+        ctx.fillStyle = tColors[ttype] || '#fff';
+        ctx.fillText(tIcons[ttype] || '?', x+10, y+3);
       }
     }
+    ctx.textAlign = 'left'; ctx.textBaseline = 'top';
   }
 
   function drawHighlights() {
@@ -1658,8 +2452,13 @@ const BATTLE = (() => {
       else if (name.includes('vareth') || name.includes('shade')) spriteType = 'vareth';
     }
 
+    // Kenney Tiny Dungeon sprite for enemies; player characters keep their procedural art
+    if (!u.isPlayer && typeof SPRITES !== 'undefined' && SPRITES.battle(ctx, spriteType, cx, cy, r)) {
+      return;
+    }
+
     ctx.save();
-    
+
     switch (spriteType) {
       case 'knight':
         // Kael: Armored knight with sword
@@ -1846,6 +2645,18 @@ const BATTLE = (() => {
     ctx.lineWidth = isActive ? 3 : 1.5;
     ctx.beginPath(); ctx.arc(cx, cy, r+2, 0, Math.PI*2); ctx.stroke();
 
+    // Facing chevron (Phase 1b) — small arrow on the side the unit faces
+    if (u.facing) {
+      const dir = u.facing === 'R' ? 1 : -1;
+      const fx = cx + dir*(r+6), fy = cy;
+      ctx.fillStyle = u.isPlayer ? 'rgba(170,221,255,0.85)' : 'rgba(255,140,110,0.85)';
+      ctx.beginPath();
+      ctx.moveTo(fx + dir*4, fy);
+      ctx.lineTo(fx - dir*3, fy - 4);
+      ctx.lineTo(fx - dir*3, fy + 4);
+      ctx.closePath(); ctx.fill();
+    }
+
     // Portrait overlay for player units (smaller, top-right)
     if (u.isPlayer && u.portrait && u.portrait !== 'none') {
       // Small portrait in corner instead of replacing sprite
@@ -1881,6 +2692,27 @@ const BATTLE = (() => {
     ctx.fillStyle='#ffffff'; ctx.font='8px Arial'; ctx.textAlign='center'; ctx.textBaseline='middle';
     ctx.fillText(`${u.hp}`, bx+bw/2, by+bh/2);
 
+    // Guard pips (Stagger) — just above the HP bar, enemies only
+    if (!u.isPlayer && u.guardMax > 0) {
+      const pipR = 2.5, gap = 7;
+      const totalW = (u.guardMax - 1) * gap;
+      const gx0 = cx - totalW/2, gy = by - 5;
+      for (let i = 0; i < u.guardMax; i++) {
+        ctx.beginPath();
+        ctx.arc(gx0 + i*gap, gy, pipR, 0, Math.PI*2);
+        ctx.fillStyle = i < u.guard ? '#ffcc33' : 'rgba(120,90,40,0.5)';
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(0,0,0,0.6)'; ctx.lineWidth = 0.75; ctx.stroke();
+      }
+    }
+    // Staggered ring — pulsing red outline
+    if (u.staggered) {
+      const p = 0.5 + 0.5*Math.sin(Date.now()*0.012);
+      ctx.strokeStyle = `rgba(255,70,90,${0.5 + 0.4*p})`;
+      ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(cx, cy, r+5, 0, Math.PI*2); ctx.stroke();
+    }
+
     ctx.textAlign='left'; ctx.textBaseline='top';
   }
 
@@ -1893,16 +2725,50 @@ const BATTLE = (() => {
     } catch(e) { return hex; }
   }
 
+  // Map a skill's element to an impact particle type (all exist in UI).
+  function elementParticle(element, dmgType) {
+    switch (element) {
+      case 'fire':      return 'fire';
+      case 'ice':       return 'ice';
+      case 'lightning': return 'lightning';
+      case 'wind':      return 'spark';
+      case 'light':     return 'holy';
+      case 'dark':      return 'void';
+      default:          return dmgType === 'magic' ? 'magic' : 'blood';
+    }
+  }
+
+  // Keyword popups that deserve extra emphasis (bigger + glow + pop).
+  const EMPHATIC = { 'CRIT!':1, 'WEAK!':1, 'BREAK!':1, 'BACK!':1, 'FLANK!':1, 'RESIST':1, 'LATENT READY!':1 };
+
   function drawFloatingTexts() {
+    const now = Date.now();
     for (const ft of floatingTexts) {
       const alpha = ft.life / ft.maxLife;
+      const emph  = EMPHATIC[ft.text];
+      // Entry pop: scale overshoots then settles over the first ~180ms.
+      const age   = ft.maxLife - ft.life;
+      const pop   = age < 180 ? 1 + 0.6 * (1 - age/180) : 1;
+      const size  = (emph ? 18 : 14) * pop;
+
+      ctx.save();
       ctx.globalAlpha = Math.min(1, alpha * 2);
-      ctx.fillStyle = ft.color;
-      ctx.font = `bold 14px Arial`;
+      ctx.translate(ft.x, ft.y);
+      ctx.font = `bold ${size.toFixed(1)}px Arial`;
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      if (emph) {
+        // Additive glow halo for punch
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.shadowColor = ft.color; ctx.shadowBlur = 12;
+        ctx.fillStyle = ft.color;
+        ctx.fillText(ft.text, 0, 0);
+        ctx.restore();
+      }
       ctx.shadowColor = '#000'; ctx.shadowBlur = 4;
-      ctx.fillText(ft.text, ft.x, ft.y);
-      ctx.shadowBlur = 0;
+      ctx.fillStyle = ft.color;
+      ctx.fillText(ft.text, 0, 0);
+      ctx.restore();
     }
     ctx.globalAlpha = 1;
     ctx.textAlign = 'left'; ctx.textBaseline = 'top';
@@ -1911,13 +2777,21 @@ const BATTLE = (() => {
   // ── Right panel ──────────────────────────────────────────────
   function drawPanel() {
     const px = PANEL_X, pw = PANEL_W;
-    // Background
-    ctx.fillStyle = 'rgba(4,3,12,0.96)';
+    // Background with subtle gradient
+    const grad = ctx.createLinearGradient(px, 0, px+pw, 620);
+    grad.addColorStop(0, 'rgba(8,6,18,0.98)');
+    grad.addColorStop(1, 'rgba(12,10,24,0.98)');
+    ctx.fillStyle = grad;
     ctx.fillRect(px, 0, pw+2, 620);
-    ctx.strokeStyle = '#332211'; ctx.lineWidth=1;
+    // Outer border
+    ctx.strokeStyle = '#4a3a2a'; ctx.lineWidth=2;
     ctx.strokeRect(px, 0, pw+1, 620);
-    ctx.strokeStyle = '#554433'; ctx.lineWidth=0.5;
-    ctx.strokeRect(px+2, 2, pw-3, 616);
+    // Inner decorative border
+    ctx.strokeStyle = '#2a2030'; ctx.lineWidth=1;
+    ctx.strokeRect(px+4, 4, pw-7, 612);
+    // Top accent bar
+    ctx.fillStyle = 'rgba(140,120,100,0.3)';
+    ctx.fillRect(px+6, 6, pw-11, 2);
 
     const cu = currentUnit();
     if (!cu) return;
@@ -1942,11 +2816,11 @@ const BATTLE = (() => {
 
     ctx.textAlign = 'left'; ctx.textBaseline = 'top';
 
-    // HP / MP bars
-    drawPanelBar(px+3, y, pw-6, 11, cu.hp, cu.maxHp, '#22cc44', '#220000', `HP ${cu.hp}/${cu.maxHp}`);
-    y += 14;
-    drawPanelBar(px+3, y, pw-6, 11, cu.mp, cu.maxMp||0, '#2255cc', '#001133', `MP ${cu.mp}/${cu.maxMp||0}`);
-    y += 17;
+    // HP / MP bars with modern styling
+    drawPanelBarV2(px+3, y, pw-6, 14, cu.hp, cu.maxHp, '#44aa44', '#1a1122', `HP ${cu.hp}/${cu.maxHp}`, '#88cc88');
+    y += 18;
+    drawPanelBarV2(px+3, y, pw-6, 14, cu.mp, cu.maxMp||0, '#4488cc', '#1a1122', `MP ${cu.mp}/${cu.maxMp||0}`, '#88bbee');
+    y += 20;
 
     // Turn queue - moved higher to prevent overlap
     ctx.fillStyle='#776655'; ctx.font='10px Georgia';
@@ -1978,48 +2852,82 @@ const BATTLE = (() => {
       return;
     }
 
-    // Player action menu
+    // Player action menu — all positions flow from dynamic `y` (after divider)
+    // y = 178 at this point (portrait 56 + name 14 + class 18 + hp 18 + mp 20 + turns 36 + divider 6 + start 10)
+    const bw = pw-8;
     if (phase === 'playerMenu' || phase === 'playerTarget') {
-      const bw = pw-8;
-      // Move button
+      // MOVE button
       ctx.fillStyle = pendingMove ? '#226622' : '#2a3344';
-      roundRect2(px+4, 108, bw, 28, 3); ctx.fill();
+      roundRect2(px+4, y, bw, 28, 3); ctx.fill();
       ctx.strokeStyle = pendingMove ? '#44aa44' : '#446688'; ctx.lineWidth=1;
-      roundRect2(px+4, 108, bw, 28, 3); ctx.stroke();
+      roundRect2(px+4, y, bw, 28, 3); ctx.stroke();
       ctx.fillStyle = pendingMove ? '#88ff88' : '#aaddff';
       ctx.font = 'bold 11px Georgia'; ctx.textAlign='center'; ctx.textBaseline='middle';
-      ctx.fillText(pendingMove ? '✓ MOVED' : 'MOVE', px+4+bw/2, 122);
+      ctx.fillText(pendingMove ? '✓ MOVED' : 'MOVE', px+4+bw/2, y+14);
       ctx.textAlign='left'; ctx.textBaseline='top';
+      y += 32;
 
-      // Skills
-      ctx.fillStyle='#776655'; ctx.font='10px Georgia';
-      ctx.fillText('SKILLS', px+5, 150);
+      // ITEMS button
+      const hasItems = Object.keys(battleInventory).length > 0;
+      ctx.fillStyle = hasItems ? '#2a4433' : '#1a1a1a';
+      roundRect2(px+4, y, bw, 22, 3); ctx.fill();
+      ctx.strokeStyle = hasItems ? '#44aa66' : '#333'; ctx.lineWidth=1;
+      roundRect2(px+4, y, bw, 22, 3); ctx.stroke();
+      ctx.fillStyle = hasItems ? '#88ffaa' : '#555';
+      ctx.font = 'bold 10px Georgia'; ctx.textAlign='center'; ctx.textBaseline='middle';
+      const itemCount = Object.values(battleInventory).reduce((a,b)=>a+b,0);
+      ctx.fillText(hasItems ? `ITEMS (${itemCount})` : 'ITEMS (0)', px+4+bw/2, y+11);
+      ctx.textAlign='left'; ctx.textBaseline='top';
+      y += 26;
+
+      // ABILITIES section header
+      ctx.fillStyle='rgba(180,160,140,0.6)'; ctx.font='bold 10px Georgia';
+      ctx.fillText('ABILITIES', px+8, y);
+      ctx.strokeStyle='rgba(140,120,100,0.3)'; ctx.lineWidth=1;
+      ctx.beginPath(); ctx.moveTo(px+8, y+12); ctx.lineTo(px+pw-8, y+12); ctx.stroke();
+      y += 18;
+
+      // Skill buttons
       const skills = cu.skills || [];
+      const skillsStartY = y;
       for (let i=0;i<skills.length;i++) {
         const sk = DATA.SKILLS[skills[i]]; if (!sk) continue;
-        const sy = 165 + i*42;
+        const sy = skillsStartY + i*44;
         const hasMP = cu.mp >= sk.mp;
         const isSel = selectedSkillKey === skills[i];
-        ctx.fillStyle = isSel ? '#553322' : hasMP ? '#1e2d3e' : '#181818';
-        roundRect2(px+4, sy, bw, 36, 3); ctx.fill();
-        ctx.strokeStyle = isSel ? '#ff8844' : (hasMP ? '#334455' : '#222');
-        ctx.lineWidth=1; roundRect2(px+4, sy, bw, 36, 3); ctx.stroke();
-        ctx.fillStyle = hasMP ? '#ffffff' : '#555';
-        ctx.font = 'bold 11px Georgia'; ctx.textAlign='left'; ctx.textBaseline='top';
-        ctx.fillText(sk.name, px+8, sy+4);
-        ctx.fillStyle = hasMP ? '#6688aa' : '#333';
-        ctx.font = '9px Georgia';
-        ctx.fillText(`MP:${sk.mp}`, px+8, sy+18);
-        ctx.fillStyle = hasMP ? '#778899' : '#333';
-        ctx.fillText(sk.desc ? sk.desc.substring(0,22)+'…' : '', px+8, sy+26);
-        // MP cost right
-        ctx.fillStyle = hasMP ? '#4488bb' : '#333';
-        ctx.textAlign='right';
-        ctx.font = 'bold 10px Georgia';
-        ctx.textAlign='left';
+        const btnGrad = ctx.createLinearGradient(px+4, sy, px+4, sy+40);
+        if (isSel) {
+          btnGrad.addColorStop(0, '#6a3a2a'); btnGrad.addColorStop(1, '#4a2a1a');
+        } else if (hasMP) {
+          btnGrad.addColorStop(0, '#2a3a4e'); btnGrad.addColorStop(1, '#1a2535');
+        } else {
+          btnGrad.addColorStop(0, '#1a1a22'); btnGrad.addColorStop(1, '#121218');
+        }
+        ctx.fillStyle = btnGrad;
+        roundRect2(px+4, sy, bw, 40, 4); ctx.fill();
+        ctx.strokeStyle = isSel ? '#ffaa66' : hasMP ? '#4a5a6e' : '#2a2a32';
+        ctx.lineWidth = isSel ? 2 : 1;
+        roundRect2(px+4, sy, bw, 40, 4); ctx.stroke();
+        ctx.fillStyle = hasMP ? '#e8e4e0' : '#666';
+        ctx.font = 'bold 12px Georgia'; ctx.textAlign='left'; ctx.textBaseline='top';
+        ctx.fillText(sk.name, px+10, sy+6);
+        const mpText = `${sk.mp} MP`;
+        ctx.font = '9px Arial';
+        const mpWidth = ctx.measureText(mpText).width + 8;
+        ctx.fillStyle = hasMP ? 'rgba(68,136,187,0.3)' : 'rgba(60,60,70,0.5)';
+        roundRect2(px+10, sy+22, mpWidth, 14, 7); ctx.fill();
+        ctx.fillStyle = hasMP ? '#88bbee' : '#555';
+        ctx.textAlign='left'; ctx.textBaseline='middle';
+        ctx.fillText(mpText, px+14, sy+29);
+        ctx.fillStyle = isSel ? '#ffaa66' : hasMP ? '#5a7a9e' : '#3a3a42';
+        ctx.fillRect(px+bw-18, sy+8, 10, 10);
+        ctx.strokeStyle = isSel ? '#ffcc88' : hasMP ? '#88aacc' : '#555';
+        ctx.lineWidth=1; ctx.strokeRect(px+bw-18, sy+8, 10, 10);
       }
+      y = skillsStartY + skills.length*44;
 
-      const waitY = 165 + skills.length*42 + 8;
+      // WAIT button
+      const waitY = y + 4;
       ctx.fillStyle='#28200c'; roundRect2(px+4, waitY, bw, 28, 3); ctx.fill();
       ctx.strokeStyle='#554422'; ctx.lineWidth=1; roundRect2(px+4, waitY, bw, 28, 3); ctx.stroke();
       ctx.fillStyle='#ccaa66'; ctx.font='bold 11px Georgia'; ctx.textAlign='center'; ctx.textBaseline='middle';
@@ -2027,13 +2935,12 @@ const BATTLE = (() => {
       ctx.textAlign='left'; ctx.textBaseline='top';
 
       if (phase === 'playerTarget') {
-        const cancelY = waitY + 38;
+        const cancelY = waitY + 32;
         ctx.fillStyle='#280000'; roundRect2(px+4, cancelY, bw, 26, 3); ctx.fill();
         ctx.strokeStyle='#882222'; ctx.lineWidth=1; roundRect2(px+4, cancelY, bw, 26, 3); ctx.stroke();
         ctx.fillStyle='#ff6644'; ctx.textAlign='center'; ctx.textBaseline='middle';
         ctx.fillText('CANCEL', px+4+bw/2, cancelY+13);
         ctx.textAlign='left'; ctx.textBaseline='top';
-        // Skill info
         if (selectedSkillKey) {
           const sk = DATA.SKILLS[selectedSkillKey];
           if (sk) {
@@ -2042,16 +2949,252 @@ const BATTLE = (() => {
           }
         }
       }
+    } else if (phase === 'playerItems' || phase === 'itemTarget') {
+      ctx.fillStyle='#776655'; ctx.font='10px Georgia';
+      ctx.fillText('ITEMS', px+5, y);
+      y += 16;
+      const itemKeys = Object.keys(battleInventory);
+      for (let i=0;i<itemKeys.length;i++) {
+        const itemKey = itemKeys[i];
+        const item = DATA.CONSUMABLES[itemKey]; if (!item) continue;
+        const iy = y + i*34;
+        const isSel = selectedItemKey === itemKey;
+        ctx.fillStyle = isSel ? '#2a3322' : '#1e2d3e';
+        roundRect2(px+4, iy, bw, 30, 3); ctx.fill();
+        ctx.strokeStyle = isSel ? '#88ff44' : '#334455'; ctx.lineWidth=1;
+        roundRect2(px+4, iy, bw, 30, 3); ctx.stroke();
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 10px Georgia'; ctx.textAlign='left'; ctx.textBaseline='top';
+        ctx.fillText(item.name, px+8, iy+3);
+        ctx.fillStyle = '#778899';
+        ctx.font = '9px Georgia';
+        ctx.fillText(`x${battleInventory[itemKey]} — ${item.desc.substring(0,24)}`, px+8, iy+16);
+      }
+      const cancelY = y + itemKeys.length*34 + 8;
+      ctx.fillStyle='#280000'; roundRect2(px+4, cancelY, bw, 24, 3); ctx.fill();
+      ctx.strokeStyle='#882222'; ctx.lineWidth=1; roundRect2(px+4, cancelY, bw, 24, 3); ctx.stroke();
+      ctx.fillStyle='#ff6644'; ctx.textAlign='center'; ctx.textBaseline='middle';
+      ctx.fillText('CANCEL', px+4+bw/2, cancelY+12);
+      ctx.textAlign='left'; ctx.textBaseline='top';
+      if (phase === 'itemTarget' && selectedItemKey) {
+        const item = DATA.CONSUMABLES[selectedItemKey];
+        if (item) {
+          ctx.fillStyle='#88ffaa'; ctx.font='10px Georgia';
+          ctx.fillText(`→ ${item.name}: Click ally to use`, px+4, cancelY+32);
+        }
+      }
     } else if (phase === 'playerMove') {
       ctx.fillStyle='#aabbcc'; ctx.font='12px Georgia';
-      ctx.fillText('Click blue tile', px+4, 120);
-      ctx.fillText('to move.', px+4, 136);
-      ctx.fillStyle='#280000'; roundRect2(px+4, 158, pw-8, 24, 3); ctx.fill();
-      ctx.strokeStyle='#882222'; ctx.lineWidth=1; roundRect2(px+4, 158, pw-8, 24, 3); ctx.stroke();
+      ctx.fillText('Click blue tile', px+4, y);
+      ctx.fillText('to move.', px+4, y+16);
+      const cancelY = y + 34;
+      ctx.fillStyle='#280000'; roundRect2(px+4, cancelY, pw-8, 24, 3); ctx.fill();
+      ctx.strokeStyle='#882222'; ctx.lineWidth=1; roundRect2(px+4, cancelY, pw-8, 24, 3); ctx.stroke();
       ctx.fillStyle='#ff6644'; ctx.textAlign='center'; ctx.textBaseline='middle';
-      ctx.fillText('CANCEL', px+(pw-8)/2+4, 170);
+      ctx.fillText('CANCEL', px+(pw-8)/2+4, cancelY+12);
       ctx.textAlign='left'; ctx.textBaseline='top';
     }
+
+    // Momentum strip (fixed position near panel bottom, above enemy note)
+    if (cu.isPlayer && (phase === 'playerMenu' || phase === 'playerTarget')) {
+      drawMomentumStrip(cu, px, pw);
+    }
+  }
+
+  // Layout constants for the momentum boost control (also used by click handler)
+  const MOM_Y      = 556;   // strip top
+  const MOM_BTN_W  = 26;
+  const MOM_BTN_H  = 22;
+  const LATENT_Y   = 522;   // latent gauge/button row (above momentum)
+  const LATENT_H   = 26;
+  const LATENT_NAMES = { Kael:'AEGIS VOW', Lyra:'SHADOW FLURRY', Theron:'VARETH SURGE', Sera:"DAWN'S GRACE" };
+
+  function drawLatentBar(cu, px, pw) {
+    const pct = (cu.latent || 0) / LATENT_MAX;
+    const ready = pct >= 1;
+    const bx = px + 4, by = LATENT_Y, bw = pw - 8;
+    if (ready) {
+      // Glowing activatable button
+      const pulse = 0.5 + 0.5*Math.sin(Date.now()*0.006);
+      ctx.fillStyle = `rgba(120,90,20,${0.85})`;
+      roundRect2(bx, by, bw, LATENT_H, 4); ctx.fill();
+      ctx.strokeStyle = `rgba(255,230,${100+Math.floor(80*pulse)},1)`; ctx.lineWidth = 2;
+      roundRect2(bx, by, bw, LATENT_H, 4); ctx.stroke();
+      ctx.fillStyle = '#ffee88'; ctx.font = 'bold 11px Georgia';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('★ ' + (LATENT_NAMES[cu.name] || 'LATENT') + ' ★', px + pw/2, by + LATENT_H/2);
+    } else {
+      // Charging gauge
+      ctx.fillStyle = 'rgba(200,180,120,0.7)'; ctx.font = 'bold 9px Georgia';
+      ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+      ctx.fillText('LATENT', bx + 4, by - 1);
+      const gy = by + 11, gw = bw - 8, gh = 8;
+      ctx.fillStyle = '#1a1626'; roundRect2(bx+4, gy, gw, gh, 3); ctx.fill();
+      const grad = ctx.createLinearGradient(bx, 0, bx+gw, 0);
+      grad.addColorStop(0, '#8866cc'); grad.addColorStop(1, '#ffcc55');
+      ctx.fillStyle = grad; roundRect2(bx+4, gy, Math.max(2, gw*pct), gh, 3); ctx.fill();
+      ctx.strokeStyle = 'rgba(120,100,80,0.5)'; ctx.lineWidth = 1;
+      roundRect2(bx+4, gy, gw, gh, 3); ctx.stroke();
+    }
+    ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+  }
+
+  function drawMomentumStrip(cu, px, pw) {
+    drawLatentBar(cu, px, pw);
+    const mom = cu.momentum || 0;
+    const y = MOM_Y;
+    // Label
+    ctx.fillStyle = 'rgba(200,180,120,0.7)'; ctx.font = 'bold 10px Georgia';
+    ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+    ctx.fillText('MOMENTUM', px + 8, y);
+    // Pips
+    const pipY = y + 18, pipR = 5, gap = 15;
+    for (let i = 0; i < MOMENTUM_MAX; i++) {
+      const cx = px + 12 + i * gap;
+      ctx.beginPath(); ctx.arc(cx, pipY, pipR, 0, Math.PI*2);
+      // spent-this-action portion shown dimmer-gold; available bright; empty grey
+      if (i < mom - pendingBoost)      ctx.fillStyle = '#ffdd55';           // available
+      else if (i < mom)                ctx.fillStyle = 'rgba(255,180,60,0.5)'; // queued to spend
+      else                             ctx.fillStyle = 'rgba(90,80,60,0.5)';   // empty
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(0,0,0,0.6)'; ctx.lineWidth = 1; ctx.stroke();
+    }
+    // −  Boost ×N  +  controls
+    const ctrlY = y + 30;
+    const minusX = px + 8, plusX = px + pw - 8 - MOM_BTN_W;
+    const maxBoost = Math.min(3, mom);
+    // minus
+    drawMomBtn(minusX, ctrlY, '−', pendingBoost > 0);
+    // plus
+    drawMomBtn(plusX, ctrlY, '+', pendingBoost < maxBoost);
+    // center label
+    ctx.fillStyle = pendingBoost > 0 ? '#ffdd55' : '#99aabb';
+    ctx.font = 'bold 12px Georgia'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(pendingBoost > 0 ? `BOOST ×${pendingBoost + 1}` : 'Boost ×1',
+                 px + pw/2, ctrlY + MOM_BTN_H/2);
+    ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+  }
+
+  function drawMomBtn(bx, by, label, enabled) {
+    ctx.fillStyle = enabled ? '#3a2f14' : '#1c1810';
+    roundRect2(bx, by, MOM_BTN_W, MOM_BTN_H, 3); ctx.fill();
+    ctx.strokeStyle = enabled ? '#8a6a2a' : '#333'; ctx.lineWidth = 1;
+    roundRect2(bx, by, MOM_BTN_W, MOM_BTN_H, 3); ctx.stroke();
+    ctx.fillStyle = enabled ? '#ffcc66' : '#555';
+    ctx.font = 'bold 15px Georgia'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(label, bx + MOM_BTN_W/2, by + MOM_BTN_H/2);
+    ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+  }
+
+  // ── Weather Drawing ──────────────────────────────────────────
+  function drawWeather() {
+    if (!currentWeather) return;
+
+    // Weather overlay on grid area
+    const gridW = GRID_COLS * CELL;
+    const gridH = GRID_ROWS * CELL;
+
+    if (currentWeather === 'rain') {
+      // Rain overlay - semi-transparent blue tint
+      ctx.fillStyle = 'rgba(100,120,180,0.15)';
+      ctx.fillRect(GRID_X, GRID_Y, gridW, gridH);
+      // Rain drops
+      ctx.strokeStyle = 'rgba(150,180,220,0.4)';
+      ctx.lineWidth = 1;
+      for (let i = 0; i < 30; i++) {
+        const rx = GRID_X + Math.random() * gridW;
+        const ry = GRID_Y + Math.random() * gridH;
+        ctx.beginPath();
+        ctx.moveTo(rx, ry);
+        ctx.lineTo(rx - 3, ry + 8);
+        ctx.stroke();
+      }
+    } else if (currentWeather === 'fog') {
+      // Fog overlay - gray mist
+      ctx.fillStyle = 'rgba(180,180,200,0.2)';
+      ctx.fillRect(GRID_X, GRID_Y, gridW, gridH);
+      // Fog particles
+      ctx.fillStyle = 'rgba(200,200,220,0.3)';
+      for (let i = 0; i < 15; i++) {
+        const fx = GRID_X + Math.random() * gridW;
+        const fy = GRID_Y + Math.random() * gridH;
+        ctx.beginPath();
+        ctx.arc(fx, fy, 20 + Math.random() * 30, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    } else if (currentWeather === 'storm') {
+      // Storm overlay - dark with lightning flashes
+      ctx.fillStyle = 'rgba(40,40,60,0.25)';
+      ctx.fillRect(GRID_X, GRID_Y, gridW, gridH);
+      // Heavy rain
+      ctx.strokeStyle = 'rgba(180,180,220,0.5)';
+      ctx.lineWidth = 1;
+      for (let i = 0; i < 50; i++) {
+        const rx = GRID_X + Math.random() * gridW;
+        const ry = GRID_Y + Math.random() * gridH;
+        ctx.beginPath();
+        ctx.moveTo(rx, ry);
+        ctx.lineTo(rx - 5, ry + 12);
+        ctx.stroke();
+      }
+    }
+
+    // Weather indicator in corner
+    const weatherIcons = { rain: '🌧️', fog: '🌫️', storm: '⛈️' };
+    ctx.font = '14px Arial';
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(weatherIcons[currentWeather] || '', GRID_X + 5, GRID_Y + 20);
+  }
+
+  // ── Battle Log Display ───────────────────────────────────────
+  function drawBattleLog() {
+    if (battleLog.length === 0) return;
+
+    const logX = 10;
+    const logY = 420;
+    const logW = 380;  // Widened from 200
+    const logH = 140;
+    const lineH = 14;
+
+    // Background
+    ctx.fillStyle = 'rgba(4,3,12,0.92)';
+    ctx.fillRect(logX, logY, logW, logH);
+    ctx.strokeStyle = 'rgba(100,80,60,0.5)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(logX, logY, logW, logH);
+
+    // Title
+    ctx.fillStyle = '#ccbb88';
+    ctx.font = 'bold 11px Georgia';
+    ctx.textAlign = 'left';
+    ctx.fillText('BATTLE LOG', logX + 6, logY + 14);
+
+    // Log entries (newest at bottom)
+    const entriesToShow = Math.min(battleLog.length, Math.floor((logH - 28) / lineH));
+    const startIdx = Math.max(0, battleLog.length - entriesToShow);
+
+    for (let i = 0; i < entriesToShow; i++) {
+      const entry = battleLog[startIdx + i];
+      const y = logY + 28 + i * lineH;
+
+      // Color based on type
+      const typeColors = {
+        attack: '#ffaa88',
+        heal: '#88ff88',
+        item: '#ffdd44',
+        status: '#88aaff',
+        normal: '#aaaaaa'
+      };
+      ctx.fillStyle = typeColors[entry.type] || '#aaaaaa';
+      ctx.font = '10px Georgia';
+
+      // Truncate text if too long (increased limit for wider box)
+      let text = entry.text;
+      if (text.length > 58) text = text.substring(0, 55) + '...';
+      ctx.fillText(text, logX + 6, y);
+    }
+
+    ctx.textAlign = 'left';
   }
 
   function drawPanelBar(x,y,w,h,val,max,fill,bg,label) {
@@ -2063,6 +3206,48 @@ const BATTLE = (() => {
     ctx.textAlign='center'; ctx.textBaseline='middle';
     ctx.fillText(label, x+w/2, y+h/2);
     ctx.textAlign='left'; ctx.textBaseline='top';
+  }
+
+  // Improved panel bar with rounded corners and glow
+  function drawPanelBarV2(x,y,w,h,val,max,fill,bg,label,glowColor) {
+    const r = h/2; // corner radius
+    // Background
+    ctx.fillStyle=bg;
+    roundRect2(x,y,w,h,r); ctx.fill();
+    // Fill bar
+    const pct=max>0?val/max:0;
+    const fillW=Math.floor(w*Math.max(0,pct));
+    if (fillW > 0) {
+      ctx.save();
+      ctx.beginPath();
+      roundRect2(x,y,fillW,h,r);
+      ctx.clip();
+      // Gradient fill
+      const grad=ctx.createLinearGradient(x,y,x,y+h);
+      grad.addColorStop(0, fill); grad.addColorStop(1, adjustBrightness(fill,-20));
+      ctx.fillStyle=grad; ctx.fillRect(x,y,fillW,h);
+      ctx.restore();
+    }
+    // Border
+    ctx.strokeStyle='rgba(60,60,80,0.8)'; ctx.lineWidth=1;
+    roundRect2(x,y,w,h,r); ctx.stroke();
+    // Label with shadow
+    ctx.shadowColor='rgba(0,0,0,0.8)'; ctx.shadowBlur=2;
+    ctx.shadowOffsetX=1; ctx.shadowOffsetY=1;
+    ctx.fillStyle='#e0e0e0'; ctx.font='bold 9px Arial';
+    ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText(label, x+w/2, y+h/2);
+    ctx.shadowBlur=0; ctx.shadowOffsetX=0; ctx.shadowOffsetY=0;
+    ctx.textAlign='left'; ctx.textBaseline='top';
+  }
+
+  // Helper to darken/lighten a hex color
+  function adjustBrightness(hex, amt) {
+    const num = parseInt(hex.replace('#',''),16);
+    const r = Math.max(0, Math.min(255, (num>>16)+amt));
+    const g = Math.max(0, Math.min(255, ((num>>8)&0x00FF)+amt));
+    const b = Math.max(0, Math.min(255, (num&0x0000FF)+amt));
+    return '#'+((r<<16)|(g<<8)|b).toString(16).padStart(6,'0');
   }
 
   function roundRect2(x,y,w,h,r) {
