@@ -544,7 +544,7 @@ const DATA = (() => {
     eLoyalty:       { name:'Loyalty',         type:'buff',     target:'self',   mult:0,   mp:0,            effect:'guardAlly' },
     eDevour:        { name:'Devour',          type:'physical', target:'single', mult:1.5, mp:0, range:1,   effect:'lifesteal', lifestealPct:0.3 },
     eVoidSlash:     { name:'Void Slash',      type:'physical', target:'single', mult:1.5, mp:0, range:1,   effect:'defDown' },
-    eRealityTear:   { name:'Reality Tear',    type:'magic',    target:'single', mult:2.0, mp:0, range:99 },
+    eRealityTear:   { name:'Reality Tear',    type:'magic',    target:'single', mult:1.6, mp:0, range:99, element:'dark' },
     ePhase:         { name:'Phase',           type:'buff',     target:'self',   mult:0,   mp:0,            effect:'evasion', evasionAmt:40, evasionTurns:2 },
     eShardSlash:    { name:'Shard Slash',     type:'physical', target:'single', mult:1.3, mp:0, range:1 },
     eSBarrier:      { name:'Barrier',         type:'buff',     target:'adjAlly',mult:0,   mp:0,            effect:'shield', shieldPct:0.5 },
