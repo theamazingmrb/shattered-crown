@@ -7,8 +7,9 @@
 
 Baseline: ~10,513 LOC, 8 modules. The CT turn engine, 12×7 grid, 12-act story, save/difficulty/bestiary/banter all exist and are good. **Your CT engine is the hardest part of FFT and it's already done** — we build on it.
 
-> **STATUS (current):** Phase 1 ✅ complete · Phase 2 ✅ complete · Phase 3 (economy/path actions/**Wounded** stakes) not started · Phase 4 (audio/polish) not started. Now in **playtest**.
-> The *Wounded penalty + town shrines* stakes above are the chosen design; they land in **Phase 3** (not yet built).
+> **STATUS (current):** Phase 1 ✅ · Phase 2 ✅ · Phase 3 **in progress** — 3a economy (gold + shops) ✅; **Wounded stakes + town shrines**, path actions (3b), town NPCs (3c), Disciplines (3d) not started. Phase 4 (audio/polish) not started.
+> Playtested B1–B4 in-browser; shipped traveling projectiles, the Sunflare Vial (first offensive consumable), an enemy-weakness data fix (10 enemies had unhittable weaknesses), and a difficulty/consumables plumbing bug fix along the way.
+> The *Wounded penalty + town shrines* stakes are the chosen design and the natural **next** Phase-3 piece — the shrine is the gold-sink that makes the new economy matter.
 
 ---
 
